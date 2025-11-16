@@ -1,33 +1,15 @@
 import { memo, useMemo } from 'react';
-import { StyleSheet, View, useColorScheme } from 'react-native';
-import MapView, { LatLng, Marker, Polyline, Region } from 'react-native-maps';
+import { StyleSheet, View } from 'react-native';
+import MapView, { Marker, Polyline } from 'react-native-maps';
 
 import { useThemeColor } from '@/hooks/use-theme-color';
+import { useColorScheme } from '@/hooks/use-color-scheme';
+import { usePreferences } from '@/contexts/preferences-context';
 import type { SampleRoute } from '@/constants/sample-stops';
+import { buildRegionFromCoordinates } from '@/utils/map';
 
 type RouteMapProps = {
   route: SampleRoute;
-};
-
-const MIN_LAT_DELTA = 0.18;
-const MIN_LNG_DELTA = 0.18;
-
-const buildRegion = (coordinates: LatLng[]): Region => {
-  const lats = coordinates.map((coord) => coord.latitude);
-  const lngs = coordinates.map((coord) => coord.longitude);
-
-  const minLat = Math.min(...lats);
-  const maxLat = Math.max(...lats);
-  const minLng = Math.min(...lngs);
-  const maxLng = Math.max(...lngs);
-
-  const latitude = (maxLat + minLat) / 2;
-  const longitude = (maxLng + minLng) / 2;
-
-  const latitudeDelta = Math.max((maxLat - minLat) * 1.6, MIN_LAT_DELTA);
-  const longitudeDelta = Math.max((maxLng - minLng) * 1.3, MIN_LNG_DELTA);
-
-  return { latitude, longitude, latitudeDelta, longitudeDelta };
 };
 
 const lightMapStyle = [
@@ -92,6 +74,7 @@ const darkMapStyle = [
 
 const RouteMap = ({ route }: RouteMapProps) => {
   const colorScheme = useColorScheme();
+  const { showTraffic, showOnlyOpenStations } = usePreferences();
   const accentColor = useThemeColor({ light: '#2b61ff', dark: '#7aa2ff' }, 'tint');
   const stopDotColor = useThemeColor({ light: '#ffffff', dark: '#0b1220' }, 'background');
   const destinationColor = useThemeColor({ light: '#ff6b66', dark: '#ff9a92' }, 'tint');
@@ -101,7 +84,11 @@ const RouteMap = ({ route }: RouteMapProps) => {
     [route.destination.coordinates, route.origin.coordinates, route.polyline]
   );
 
-  const region = useMemo(() => buildRegion(allCoordinates), [allCoordinates]);
+  const region = useMemo(() => buildRegionFromCoordinates(allCoordinates), [allCoordinates]);
+  const stops = useMemo(
+    () => (showOnlyOpenStations ? route.stops.filter((stop) => stop.isOpen !== false) : route.stops),
+    [route.stops, showOnlyOpenStations]
+  );
 
   return (
     <View style={styles.wrapper}>
@@ -114,10 +101,11 @@ const RouteMap = ({ route }: RouteMapProps) => {
         showsBuildings={false}
         toolbarEnabled={false}
         pitchEnabled={false}
+        showsTraffic={showTraffic}
       >
         <Polyline coordinates={route.polyline} strokeColor={accentColor} strokeWidth={5} />
         <Marker coordinate={route.origin.coordinates} title={route.origin.label} pinColor={accentColor} />
-        {route.stops.map((stop) => (
+        {stops.map((stop) => (
           <Marker
             key={stop.id}
             coordinate={stop.coordinates}

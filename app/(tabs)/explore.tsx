@@ -1,76 +1,280 @@
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useMemo, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
+import RouteMap from '@/components/RouteMap';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import type { FuelGrade, SampleStop } from '@/constants/sample-stops';
+import { MIDLAND_TO_AUSTIN_ROUTE } from '@/constants/sample-stops';
+import { getBrandStyle } from '@/constants/station-brand';
 import { useThemeColor } from '@/hooks/use-theme-color';
-import { MIDLAND_TO_AUSTIN_STOPS } from '@/constants/sample-stops';
+import { usePreferences } from '@/contexts/preferences-context';
+import { useFuelPrices } from '@/hooks/use-fuel-prices';
+import { formatDistance, formatFuelPrice, formatUpdatedLabel } from '@/utils/stations';
 
-export default function StopsScreen() {
+type SortKey = 'distance' | 'price' | 'updated';
+type FilterId = 'all' | 'open' | 'rewards' | 'detour';
+
+const sortOptions: { key: SortKey; label: string }[] = [
+  { key: 'distance', label: 'Distance' },
+  { key: 'price', label: 'Price' },
+  { key: 'updated', label: 'Updated' },
+];
+
+const filterChips: { id: FilterId; label: string }[] = [
+  { id: 'all', label: 'All stops' },
+  { id: 'open', label: 'Open now' },
+  { id: 'rewards', label: 'Rewards' },
+  { id: 'detour', label: '< 0.5 mi detour' },
+];
+
+const route = MIDLAND_TO_AUSTIN_ROUTE;
+const fuelGradeLabel = {
+  regular: 'Regular',
+  midgrade: 'Midgrade',
+  premium: 'Premium',
+} as const;
+
+const priceValue = (stop: SampleStop, grade: FuelGrade) =>
+  stop.fuelBreakdown?.[grade] ?? Number(stop.price.replace('$', ''));
+
+export default function ExploreScreen() {
+  const [sortKey, setSortKey] = useState<SortKey>('distance');
+  const [filter, setFilter] = useState<FilterId>('all');
+  const { showOnlyOpenStations, fuelGrade } = usePreferences();
+  const fuelPriceState = useFuelPrices(route.stops);
+
+  const mutedTextColor = useThemeColor({ light: '#6b7280', dark: '#9ca3af' }, 'tabIconDefault');
+  const cardSurface = useThemeColor({ light: '#ffffff', dark: '#111827' }, 'background');
+  const accentColor = useThemeColor({ light: '#2563eb', dark: '#7aa2ff' }, 'tint');
   const borderColor = useThemeColor(
-    { light: 'rgba(39,76,119,0.2)', dark: 'rgba(255,255,255,0.2)' },
+    { light: 'rgba(15,23,42,0.08)', dark: 'rgba(255,255,255,0.12)' },
     'tabIconDefault'
   );
-  const mutedTextColor = useThemeColor({ light: '#6b7280', dark: '#9ca3af' }, 'tabIconDefault');
+  const helperSurface = useThemeColor({ light: '#f3f4ff', dark: '#1c2537' }, 'background');
+
+  const preferenceStops = useMemo(
+    () => (showOnlyOpenStations ? route.stops.filter((stop) => stop.isOpen !== false) : route.stops),
+    [showOnlyOpenStations]
+  );
+
+  const filteredStops = useMemo(() => {
+    return preferenceStops.filter((stop) => {
+      if (filter === 'open') return stop.isOpen;
+      if (filter === 'rewards') return stop.amenities?.includes('Rewards eligible');
+      if (filter === 'detour') return (stop.distanceOffsetMiles ?? 0) <= 0.5;
+      return true;
+    });
+  }, [filter, preferenceStops]);
+
+  const sortedStops = useMemo(() => {
+    const next = [...filteredStops];
+    next.sort((a, b) => {
+      if (sortKey === 'price') {
+        return priceValue(a, fuelGrade) - priceValue(b, fuelGrade);
+      }
+      if (sortKey === 'updated') {
+        return (a.lastUpdatedMinutes ?? 999) - (b.lastUpdatedMinutes ?? 999);
+      }
+
+      return (a.distanceMiles ?? 0) - (b.distanceMiles ?? 0);
+    });
+    return next;
+  }, [filteredStops, sortKey, fuelGrade]);
+
+  const driveMinutes = 320;
+  const driveHours = Math.floor(driveMinutes / 60);
+  const driveLeftover = driveMinutes % 60;
+
+  const activeSort = sortOptions.find((option) => option.key === sortKey) ?? sortOptions[0];
+
+  const cycleSort = () => {
+    const currentIndex = sortOptions.findIndex((option) => option.key === sortKey);
+    const nextIndex = (currentIndex + 1) % sortOptions.length;
+    setSortKey(sortOptions[nextIndex].key);
+  };
+
+  const stationPrices = fuelPriceState.data;
+  const priceStatusLabel =
+    fuelPriceState.status === 'ready'
+      ? 'Live prices'
+      : fuelPriceState.status === 'loading'
+        ? 'Refreshing live prices…'
+        : 'Offline price cache';
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      <ThemedView style={styles.card} lightColor="#ffffff" darkColor="#1f2933">
-        <ThemedText type="title">Stops & Pricing</ThemedText>
-        <ThemedText style={[styles.bodyText, { color: mutedTextColor }]}>
-          This tab will surface real-time fuel prices, detours, and routing overlays once the Google
-          Directions and pricing providers are connected.
-        </ThemedText>
-      </ThemedView>
-
-      <ThemedView style={styles.card} lightColor="#ffffff" darkColor="#1f2933">
-        <ThemedText type="subtitle">Route Preview</ThemedText>
-        <View style={[styles.mapPlaceholder, { borderColor }]}>
-          <ThemedText style={styles.mapPlaceholderText}>Map preview placeholder</ThemedText>
-          <ThemedText style={[styles.bodyText, styles.mapHint, { color: mutedTextColor }]}>
-            Render the Google Maps polyline here, centered on the active route.
+      <ThemedView style={[styles.heroCard, { backgroundColor: cardSurface }]}>
+        <View style={styles.heroHeader}>
+          <ThemedText type="title">Along Route</ThemedText>
+          <ThemedText style={[styles.heroSubheading, { color: mutedTextColor }]}>
+            Curated stations synced to your Midland → Austin path.
           </ThemedText>
+        </View>
+        <View style={styles.heroMetaRow}>
+          <View style={[styles.heroMetaCard, { backgroundColor: helperSurface }]}>
+            <ThemedText style={styles.heroMetaLabel}>Drive Time</ThemedText>
+            <ThemedText style={styles.heroMetaValue}>
+              {driveHours}h {driveLeftover.toString().padStart(2, '0')}m
+            </ThemedText>
+            <ThemedText style={[styles.heroMetaCaption, { color: mutedTextColor }]}>
+              With rest + fuel breaks
+            </ThemedText>
+          </View>
+          <View style={[styles.heroMetaCard, { backgroundColor: helperSurface }]}>
+            <ThemedText style={styles.heroMetaLabel}>Stops</ThemedText>
+            <ThemedText style={styles.heroMetaValue}>{route.stops.length}</ThemedText>
+            <ThemedText style={[styles.heroMetaCaption, { color: mutedTextColor }]}>
+              Swap in alternates
+            </ThemedText>
+          </View>
+          <View style={[styles.heroMetaCard, { backgroundColor: helperSurface }]}>
+            <ThemedText style={styles.heroMetaLabel}>Savings</ThemedText>
+            <ThemedText style={styles.heroMetaValue}>~$12</ThemedText>
+            <ThemedText style={[styles.heroMetaCaption, { color: mutedTextColor }]}>
+              Per tank plan
+            </ThemedText>
+          </View>
+        </View>
+
+        <View style={styles.heroMapWrapper}>
+          <RouteMap route={route} />
         </View>
       </ThemedView>
 
-      <ThemedView style={styles.card} lightColor="#ffffff" darkColor="#1f2933">
-        <ThemedText type="subtitle">Sample Stop Order</ThemedText>
-        {MIDLAND_TO_AUSTIN_STOPS.map((stop, index) => (
-          <View key={stop.id} style={[styles.stopRow, { borderColor }]}>
-            <View style={styles.stopBadge}>
-              <ThemedText style={styles.stopBadgeLabel}>{index + 1}</ThemedText>
+      <View style={styles.toolbar}>
+        <Pressable style={[styles.sortButton, { borderColor }]} onPress={cycleSort}>
+          <Ionicons name="swap-vertical" size={18} color={accentColor} />
+          <ThemedText style={styles.sortLabel}>Sort by {activeSort.label}</ThemedText>
+          <Ionicons name="chevron-down" size={18} color={accentColor} />
+        </Pressable>
+        <Pressable style={[styles.viewButton, { backgroundColor: helperSurface }]}>
+          <Ionicons name="map-outline" size={18} color={accentColor} />
+          <ThemedText style={[styles.viewButtonLabel, { color: accentColor }]}>Map</ThemedText>
+        </Pressable>
+      </View>
+      <ThemedText style={[styles.priceStatusText, { color: mutedTextColor }]}>
+        {priceStatusLabel} • {fuelGradeLabel[fuelGrade]}
+      </ThemedText>
+
+      <View style={styles.filterRow}>
+        {filterChips.map((chip) => (
+          <Pressable
+            key={chip.id}
+            onPress={() => setFilter(chip.id)}
+            style={[
+              styles.filterChip,
+              {
+                backgroundColor: filter === chip.id ? accentColor : 'transparent',
+                borderColor,
+              },
+            ]}
+          >
+            <ThemedText
+              style={[
+                styles.filterChipLabel,
+                { color: filter === chip.id ? '#ffffff' : mutedTextColor },
+              ]}
+            >
+              {chip.label}
+            </ThemedText>
+          </Pressable>
+        ))}
+      </View>
+
+      {sortedStops.map((stop) => {
+        const brand = getBrandStyle(stop.brand);
+        return (
+          <ThemedView
+            key={stop.id}
+            style={[styles.stopCard, { backgroundColor: cardSurface, borderColor }]}
+          >
+            <View style={styles.stopHeader}>
+              <View style={styles.brandRow}>
+                <View style={[styles.brandBadge, { backgroundColor: brand.background }]}>
+                  <ThemedText style={styles.brandEmoji}>{brand.emoji}</ThemedText>
+                </View>
+                <View>
+                  <ThemedText type="defaultSemiBold">{stop.name}</ThemedText>
+                  <ThemedText style={[styles.stopCity, { color: mutedTextColor }]}>
+                    {stop.city}
+                  </ThemedText>
+                </View>
+              </View>
+              <View style={styles.priceStack}>
+                <ThemedText style={styles.priceValue}>
+                  {formatFuelPrice(stop, fuelGrade, stationPrices)}
+                </ThemedText>
+                <ThemedText style={[styles.priceCaption, { color: mutedTextColor }]}>
+                  per gal
+                </ThemedText>
+              </View>
             </View>
-            <View style={styles.stopDetails}>
-              <ThemedText type="defaultSemiBold">{stop.name}</ThemedText>
-              <ThemedText>{stop.city}</ThemedText>
-              <ThemedText style={[styles.bodyText, { color: mutedTextColor }]}>
-                {stop.price} • ETA {stop.etaMinutes} min • {stop.distanceOffsetMiles} mi off route
+
+            <View style={styles.metaRow}>
+              <View style={styles.metaPill}>
+                <Ionicons name="locate" size={14} color={accentColor} />
+                <ThemedText style={[styles.metaLabel, { color: accentColor }]}>
+                  {formatDistance(stop.distanceMiles)} away
+                </ThemedText>
+              </View>
+              <View style={styles.metaPill}>
+                <Ionicons name="git-branch" size={14} color={accentColor} />
+                <ThemedText style={[styles.metaLabel, { color: accentColor }]}>
+                  {stop.distanceOffsetMiles} mi detour
+                </ThemedText>
+              </View>
+              <View
+                style={[
+                  styles.statusPill,
+                  { backgroundColor: stop.isOpen ? 'rgba(34,197,94,0.14)' : 'rgba(248,113,113,0.14)' },
+                ]}
+              >
+                <ThemedText
+                  style={[
+                    styles.statusPillLabel,
+                    { color: stop.isOpen ? '#15803d' : '#b91c1c' },
+                  ]}
+                >
+                  {stop.isOpen ? 'Open' : 'Closed'}
+                </ThemedText>
+              </View>
+            </View>
+
+            <View style={styles.metaRow}>
+              <View style={styles.ratingPill}>
+                <Ionicons name="star" size={14} color="#fbbf24" />
+                <ThemedText style={styles.ratingLabel}>{stop.rating?.toFixed(1) ?? '4.5'}</ThemedText>
+              </View>
+              <ThemedText style={[styles.updatedText, { color: mutedTextColor }]}>
+                {formatUpdatedLabel(stationPrices[stop.id]?.updatedAt, stop.lastUpdatedMinutes)}
               </ThemedText>
             </View>
-          </View>
-        ))}
-      </ThemedView>
 
-      <ThemedView style={styles.card} lightColor="#ffffff" darkColor="#1f2933">
-        <ThemedText type="subtitle">Next Build Tasks</ThemedText>
-        <View style={styles.taskItem}>
-          <View style={[styles.bullet, { backgroundColor: borderColor }]} />
-          <ThemedText style={styles.bodyText}>
-            Integrate Google Directions API for route geometry and travel time.
-          </ThemedText>
-        </View>
-        <View style={styles.taskItem}>
-          <View style={[styles.bullet, { backgroundColor: borderColor }]} />
-          <ThemedText style={styles.bodyText}>
-            Add a fuel pricing provider (GasBuddy commercial API or alternative) with caching.
-          </ThemedText>
-        </View>
-        <View style={styles.taskItem}>
-          <View style={[styles.bullet, { backgroundColor: borderColor }]} />
-          <ThemedText style={styles.bodyText}>
-            Plot stops on the map and sync selections with the route planner tab.
-          </ThemedText>
-        </View>
-      </ThemedView>
+            {stop.note && (
+              <View style={[styles.noteBanner, { backgroundColor: helperSurface }]}>
+                <Ionicons name="alert-circle" size={16} color={accentColor} />
+                <ThemedText style={styles.noteText}>{stop.note}</ThemedText>
+              </View>
+            )}
+
+            <View style={styles.stopFooter}>
+              <View>
+                <ThemedText style={styles.footerLabel}>
+                  ETA {stop.etaMinutes} min • Rewards ready
+                </ThemedText>
+                <ThemedText style={[styles.footerCaption, { color: mutedTextColor }]}>
+                  Includes {stop.amenities?.join(', ') ?? 'standard amenities'}
+                </ThemedText>
+              </View>
+              <Pressable style={[styles.stopButton, { backgroundColor: accentColor }]}>
+                <ThemedText style={styles.stopButtonLabel}>Add Stop</ThemedText>
+              </Pressable>
+            </View>
+          </ThemedView>
+        );
+      })}
     </ScrollView>
   );
 }
@@ -79,64 +283,210 @@ const styles = StyleSheet.create({
   container: {
     padding: 20,
     gap: 20,
+    paddingBottom: 32,
   },
-  card: {
-    padding: 18,
-    borderRadius: 16,
-    gap: 14,
+  heroCard: {
+    padding: 20,
+    borderRadius: 28,
+    gap: 18,
   },
-  bodyText: {
+  heroHeader: {
+    gap: 8,
+  },
+  heroSubheading: {
     fontSize: 16,
     lineHeight: 22,
   },
-  mapPlaceholder: {
-    borderWidth: 2,
-    borderStyle: 'dashed',
+  heroMetaRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  heroMetaCard: {
+    flex: 1,
     borderRadius: 16,
-    padding: 24,
-    alignItems: 'center',
+    padding: 14,
     gap: 6,
   },
-  mapPlaceholderText: {
-    fontSize: 18,
+  heroMetaLabel: {
+    fontSize: 13,
     fontWeight: '600',
   },
-  mapHint: {
-    textAlign: 'center',
+  heroMetaValue: {
+    fontSize: 22,
+    fontWeight: '700',
   },
-  stopRow: {
+  heroMetaCaption: {
+    fontSize: 12,
+  },
+  heroMapWrapper: {
+    borderRadius: 24,
+    overflow: 'hidden',
+  },
+  toolbar: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
     gap: 12,
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  stopBadge: {
-    height: 28,
-    width: 28,
-    borderRadius: 14,
-    backgroundColor: '#274c77',
     alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 2,
   },
-  stopBadgeLabel: {
-    color: '#fff',
+  sortButton: {
+    flex: 1,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  sortLabel: {
+    fontWeight: '600',
+    flex: 1,
+  },
+  viewButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderRadius: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+  },
+  viewButtonLabel: {
     fontWeight: '600',
   },
-  stopDetails: {
-    flex: 1,
-    gap: 2,
+  priceStatusText: {
+    fontSize: 12,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
   },
-  taskItem: {
+  filterRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    flexWrap: 'wrap',
     gap: 10,
   },
-  bullet: {
-    height: 8,
-    width: 8,
-    borderRadius: 4,
-    marginTop: 7,
+  filterChip: {
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  filterChipLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  stopCard: {
+    borderRadius: 24,
+    padding: 18,
+    gap: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  stopHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 16,
+  },
+  brandRow: {
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'center',
+  },
+  brandBadge: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  brandEmoji: {
+    fontSize: 24,
+  },
+  stopCity: {
+    fontSize: 14,
+  },
+  priceStack: {
+    alignItems: 'flex-end',
+  },
+  priceValue: {
+    fontSize: 24,
+    fontWeight: '700',
+  },
+  priceCaption: {
+    fontSize: 12,
+  },
+  metaRow: {
+    flexDirection: 'row',
+    gap: 10,
+    flexWrap: 'wrap',
+    alignItems: 'center',
+  },
+  metaPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(37,99,235,0.08)',
+  },
+  metaLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  statusPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+  statusPillLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
+  ratingPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(251,191,36,0.12)',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  ratingLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  updatedText: {
+    fontSize: 13,
+  },
+  noteBanner: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+    borderRadius: 14,
+    padding: 12,
+  },
+  noteText: {
+    flex: 1,
+    fontSize: 14,
+  },
+  stopFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  footerLabel: {
+    fontWeight: '600',
+  },
+  footerCaption: {
+    fontSize: 13,
+  },
+  stopButton: {
+    borderRadius: 14,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+  },
+  stopButtonLabel: {
+    color: '#ffffff',
+    fontWeight: '700',
   },
 });

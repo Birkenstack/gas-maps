@@ -3,14 +3,26 @@ export type Coordinates = {
   longitude: number;
 };
 
+export type FuelGrade = 'regular' | 'midgrade' | 'premium';
+
+export type FuelBreakdown = Record<FuelGrade, number>;
+
 export type SampleStop = {
   id: string;
   name: string;
+  brand?: string;
   city: string;
   price: string;
+  fuelBreakdown?: FuelBreakdown;
   etaMinutes: number;
   distanceOffsetMiles: number;
+  distanceMiles?: number;
+  lastUpdatedMinutes?: number;
+  isOpen?: boolean;
+  rating?: number;
+  amenities?: string[];
   coordinates: Coordinates;
+  note?: string;
 };
 
 export type SampleRouteEndpoint = {
@@ -33,38 +45,85 @@ export const MIDLAND_TO_AUSTIN_STOPS: SampleStop[] = [
   {
     id: 'odessa',
     name: 'Sunoco - Loop 338',
+    brand: 'Sunoco',
     city: 'Odessa, TX',
     price: '$2.89',
+    fuelBreakdown: { regular: 2.89, midgrade: 3.15, premium: 3.39 },
     etaMinutes: 45,
     distanceOffsetMiles: 0.5,
+    distanceMiles: 0.4,
+    lastUpdatedMinutes: 28,
+    isOpen: true,
+    rating: 4.7,
+    amenities: ['Restrooms', 'Air & water'],
     coordinates: { latitude: 31.8455, longitude: -102.3381 },
   },
   {
     id: 'big-spring',
     name: 'Chevron - I-20 Frontage',
+    brand: 'Chevron',
     city: 'Big Spring, TX',
     price: '$3.01',
+    fuelBreakdown: { regular: 3.01, midgrade: 3.29, premium: 3.55 },
     etaMinutes: 98,
     distanceOffsetMiles: 0.2,
+    distanceMiles: 0.6,
+    lastUpdatedMinutes: 42,
+    isOpen: true,
+    rating: 4.5,
+    amenities: ['Rewards eligible', 'Restrooms'],
     coordinates: { latitude: 32.2501, longitude: -101.4789 },
   },
   {
     id: 'abilene',
     name: "Buc-ee's",
+    brand: "Buc-ee's",
     city: 'Abilene, TX',
     price: '$2.95',
+    fuelBreakdown: { regular: 2.95, midgrade: 3.22, premium: 3.48 },
     etaMinutes: 160,
     distanceOffsetMiles: 1.1,
+    distanceMiles: 1.2,
+    lastUpdatedMinutes: 15,
+    isOpen: true,
+    rating: 4.9,
+    amenities: ['Food court', 'Restrooms', 'EV charging'],
     coordinates: { latitude: 32.4473, longitude: -99.7389 },
+    note: 'Popular stop — plan for weekend crowds',
   },
   {
     id: 'lampasas',
     name: 'Shell - US-183',
+    brand: 'Shell',
     city: 'Lampasas, TX',
     price: '$3.05',
+    fuelBreakdown: { regular: 3.05, midgrade: 3.32, premium: 3.59 },
     etaMinutes: 235,
     distanceOffsetMiles: 0.7,
+    distanceMiles: 0.3,
+    lastUpdatedMinutes: 70,
+    isOpen: false,
+    rating: 4.2,
+    amenities: ['Air & water'],
     coordinates: { latitude: 31.0636, longitude: -98.181 },
+    note: 'Maintenance window 11p–4a',
+  },
+  {
+    id: 'cedar-park',
+    name: 'QuikStop - Brushy Creek',
+    brand: 'QuikStop',
+    city: 'Cedar Park, TX',
+    price: '$2.66',
+    fuelBreakdown: { regular: 2.66, midgrade: 2.98, premium: 3.24 },
+    etaMinutes: 280,
+    distanceOffsetMiles: 0.4,
+    distanceMiles: 0.5,
+    lastUpdatedMinutes: 9,
+    isOpen: true,
+    rating: 4.6,
+    amenities: ['Air & water', 'Mini-mart'],
+    coordinates: { latitude: 30.5308, longitude: -97.816 },
+    note: 'Short detour for lower premium prices',
   },
 ];
 
