@@ -16,7 +16,19 @@ const resolveFuelPrice = (
     return value;
   }
 
-  return Number(stop.price.replace('$', ''));
+  const rawPrice: unknown = (stop as any).price;
+
+  if (typeof rawPrice === 'number') {
+    return rawPrice;
+  }
+
+  if (typeof rawPrice === 'string') {
+    const cleaned = rawPrice.replace('$', '').trim();
+    const parsed = Number(cleaned);
+    return Number.isNaN(parsed) ? 0 : parsed;
+  }
+
+  return 0;
 };
 
 export const formatFuelPrice = (

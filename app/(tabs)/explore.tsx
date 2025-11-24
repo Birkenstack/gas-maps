@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import RouteMap from '@/components/RouteMap';
@@ -8,9 +8,10 @@ import { ThemedView } from '@/components/themed-view';
 import type { FuelGrade, SampleStop } from '@/constants/sample-stops';
 import { MIDLAND_TO_AUSTIN_ROUTE } from '@/constants/sample-stops';
 import { getBrandStyle } from '@/constants/station-brand';
-import { useThemeColor } from '@/hooks/use-theme-color';
 import { usePreferences } from '@/contexts/preferences-context';
 import { useFuelPrices } from '@/hooks/use-fuel-prices';
+import { useThemeColor } from '@/hooks/use-theme-color';
+import { fetchStopsForRoute } from '@/services/stopService';
 import { formatDistance, formatFuelPrice, formatUpdatedLabel } from '@/utils/stations';
 
 type SortKey = 'distance' | 'price' | 'updated';
@@ -36,14 +37,58 @@ const fuelGradeLabel = {
   premium: 'Premium',
 } as const;
 
-const priceValue = (stop: SampleStop, grade: FuelGrade) =>
-  stop.fuelBreakdown?.[grade] ?? Number(stop.price.replace('$', ''));
+const priceValue = (stop: SampleStop, grade: FuelGrade) => {
+  // 1) Prefer a specific fuelBreakdown price if available
+  const breakdown = stop.fuelBreakdown?.[grade];
+  if (typeof breakdown === 'number') {
+    return breakdown;
+  }
+
+  // 2) Fall back to stop.price, which may be a number or a string
+  const rawPrice: unknown = (stop as any).price;
+
+  if (typeof rawPrice === 'number') {
+    // API already returns a numeric price (e.g. 2.89)
+    return rawPrice;
+  }
+
+  if (typeof rawPrice === 'string') {
+    // Handle values like \"$2.89\" or \"2.89\"
+    const cleaned = rawPrice.replace('$', '').trim();
+    const parsed = Number(cleaned);
+    return Number.isNaN(parsed) ? 0 : parsed;
+  }
+
+  // 3) Fallback if price is missing/invalid
+  return 0;
+};
 
 export default function ExploreScreen() {
   const [sortKey, setSortKey] = useState<SortKey>('distance');
   const [filter, setFilter] = useState<FilterId>('all');
+
+  const [stops, setStops] = useState<SampleStop[]>(route.stops);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const { showOnlyOpenStations, fuelGrade } = usePreferences();
-  const fuelPriceState = useFuelPrices(route.stops);
+  const fuelPriceState = useFuelPrices(stops);
+    useEffect(() => {
+    async function loadStops() {
+      try {
+        setLoading(true);
+        const data = await fetchStopsForRoute('Midland, TX', 'Austin, TX');
+        setStops(data);
+      } catch (err) {
+        console.error(err);
+        setError('Failed to load live stops. Showing sample data.');
+        setStops(route.stops); // fall back to local sample
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadStops();
+  }, []);
 
   const mutedTextColor = useThemeColor({ light: '#6b7280', dark: '#9ca3af' }, 'tabIconDefault');
   const cardSurface = useThemeColor({ light: '#ffffff', dark: '#111827' }, 'background');
@@ -55,8 +100,8 @@ export default function ExploreScreen() {
   const helperSurface = useThemeColor({ light: '#f3f4ff', dark: '#1c2537' }, 'background');
 
   const preferenceStops = useMemo(
-    () => (showOnlyOpenStations ? route.stops.filter((stop) => stop.isOpen !== false) : route.stops),
-    [showOnlyOpenStations]
+    () => (showOnlyOpenStations ? stops.filter((stop) => stop.isOpen !== false) : stops),
+    [showOnlyOpenStations, stops]
   );
 
   const filteredStops = useMemo(() => {
@@ -124,7 +169,7 @@ export default function ExploreScreen() {
           </View>
           <View style={[styles.heroMetaCard, { backgroundColor: helperSurface }]}>
             <ThemedText style={styles.heroMetaLabel}>Stops</ThemedText>
-            <ThemedText style={styles.heroMetaValue}>{route.stops.length}</ThemedText>
+            <ThemedText style={styles.heroMetaValue}>{stops.length}</ThemedText>
             <ThemedText style={[styles.heroMetaCaption, { color: mutedTextColor }]}>
               Swap in alternates
             </ThemedText>
