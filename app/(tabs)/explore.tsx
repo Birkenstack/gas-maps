@@ -11,7 +11,14 @@ import { getBrandStyle } from '@/constants/station-brand';
 import { usePreferences } from '@/contexts/preferences-context';
 import { useFuelPrices } from '@/hooks/use-fuel-prices';
 import { useThemeColor } from '@/hooks/use-theme-color';
-import { fetchStopsForRoute } from '@/services/stopService';
+import {
+  addStopToPlan,
+  fetchRoute,
+  fetchSelectedStops,
+  fetchStopsForRoute,
+  removeStopFromPlan,
+  type SelectedStopRecord,
+} from '@/services/stopService';
 import { formatDistance, formatFuelPrice, formatUpdatedLabel } from '@/utils/stations';
 
 type SortKey = 'distance' | 'price' | 'updated';
@@ -30,7 +37,6 @@ const filterChips: { id: FilterId; label: string }[] = [
   { id: 'detour', label: '< 0.5 mi detour' },
 ];
 
-const route = MIDLAND_TO_AUSTIN_ROUTE;
 const fuelGradeLabel = {
   regular: 'Regular',
   midgrade: 'Midgrade',
@@ -64,30 +70,55 @@ const priceValue = (stop: SampleStop, grade: FuelGrade) => {
 };
 
 export default function ExploreScreen() {
+  const [route, setRoute] = useState(MIDLAND_TO_AUSTIN_ROUTE);
   const [sortKey, setSortKey] = useState<SortKey>('distance');
   const [filter, setFilter] = useState<FilterId>('all');
 
   const [stops, setStops] = useState<SampleStop[]>(route.stops);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedStops, setSelectedStops] = useState<Record<string, SelectedStopRecord>>({});
+
   const { showOnlyOpenStations, fuelGrade } = usePreferences();
   const fuelPriceState = useFuelPrices(stops);
-    useEffect(() => {
-    async function loadStops() {
+
+  useEffect(() => {
+    async function loadData() {
       try {
         setLoading(true);
-        const data = await fetchStopsForRoute('Midland, TX', 'Austin, TX');
-        setStops(data);
+
+        const [routeData, stopsData, selectionData] = await Promise.all([
+          fetchRoute('Midland, TX', 'Austin, TX'),
+          fetchStopsForRoute('Midland, TX', 'Austin, TX'),
+          fetchSelectedStops(),
+        ]);
+        console.log('Fetched route:', routeData);
+        console.log('Fetched stops:', stopsData);
+        console.log('Fetched selected stops:', selectionData);
+
+        setRoute(routeData);
+        setStops(stopsData);
+        setSelectedStops(
+          selectionData.reduce<Record<string, SelectedStopRecord>>((acc, record) => {
+            const key = String(record.stopId ?? record.station?.id ?? '');
+            if (key) {
+              acc[key] = record;
+            }
+            return acc;
+          }, {})
+        );
       } catch (err) {
         console.error(err);
-        setError('Failed to load live stops. Showing sample data.');
-        setStops(route.stops); // fall back to local sample
+        setError('Failed to load live data. Showing fallback route.');
+        setRoute(MIDLAND_TO_AUSTIN_ROUTE);
+        setStops(MIDLAND_TO_AUSTIN_ROUTE.stops);
+        setSelectedStops({});
       } finally {
         setLoading(false);
       }
     }
 
-    loadStops();
+    loadData();
   }, []);
 
   const mutedTextColor = useThemeColor({ light: '#6b7280', dark: '#9ca3af' }, 'tabIconDefault');
@@ -138,6 +169,35 @@ export default function ExploreScreen() {
     const currentIndex = sortOptions.findIndex((option) => option.key === sortKey);
     const nextIndex = (currentIndex + 1) % sortOptions.length;
     setSortKey(sortOptions[nextIndex].key);
+  };
+
+  const handleToggleStop = async (stop: SampleStop) => {
+    try {
+      const routeId = (route as any).id ?? 'midland-to-austin';
+      const stopKey = String(stop.id ?? '');
+      if (!stopKey) {
+        return;
+      }
+
+      const existing = selectedStops[stopKey];
+
+      if (existing) {
+        await removeStopFromPlan(existing.id);
+        setSelectedStops((prev) => {
+          const next = { ...prev };
+          delete next[stopKey];
+          return next;
+        });
+        console.log('Removed stop from plan:', existing);
+        return;
+      }
+
+      const result = await addStopToPlan(stopKey, routeId);
+      console.log('Added stop to plan:', result);
+      setSelectedStops((prev) => ({ ...prev, [stopKey]: result }));
+    } catch (err) {
+      console.error('Failed to toggle stop', err);
+    }
   };
 
   const stationPrices = fuelPriceState.data;
@@ -230,6 +290,8 @@ export default function ExploreScreen() {
 
       {sortedStops.map((stop) => {
         const brand = getBrandStyle(stop.brand);
+        const stopKey = String(stop.id ?? '');
+        const isSelected = stopKey ? Boolean(selectedStops[stopKey]) : false;
         return (
           <ThemedView
             key={stop.id}
@@ -313,8 +375,22 @@ export default function ExploreScreen() {
                   Includes {stop.amenities?.join(', ') ?? 'standard amenities'}
                 </ThemedText>
               </View>
-              <Pressable style={[styles.stopButton, { backgroundColor: accentColor }]}>
-                <ThemedText style={styles.stopButtonLabel}>Add Stop</ThemedText>
+              <Pressable
+                style={[
+                  styles.stopButton,
+                  { backgroundColor: accentColor },
+                  isSelected && styles.stopButtonSelected,
+                ]}
+                onPress={() => handleToggleStop(stop)}
+              >
+                <ThemedText
+                  style={[
+                    styles.stopButtonLabel,
+                    isSelected && styles.stopButtonLabelSelected,
+                  ]}
+                >
+                  {isSelected ? 'Added' : 'Add Stop'}
+                </ThemedText>
               </Pressable>
             </View>
           </ThemedView>
@@ -530,8 +606,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingVertical: 12,
   },
+  stopButtonSelected: {
+    opacity: 0.85,
+  },
   stopButtonLabel: {
     color: '#ffffff',
     fontWeight: '700',
+  },
+  stopButtonLabelSelected: {
+    color: '#e0e7ff',
   },
 });
