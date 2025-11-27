@@ -27,17 +27,24 @@ export default function SettingsScreen() {
     setFuelGrade,
   } = usePreferences();
 
-  const cardSurface = useThemeColor({ light: '#ffffff', dark: '#111827' }, 'background');
-  const muted = useThemeColor({ light: '#6b7280', dark: '#9ca3af' }, 'tabIconDefault');
-  const accent = useThemeColor({ light: '#2563eb', dark: '#7aa2ff' }, 'tint');
-  const helperSurface = useThemeColor({ light: '#f3f4ff', dark: '#1f2537' }, 'background');
+  const pageBackground = useThemeColor({ light: '#F7F7F7', dark: '#030712' }, 'background');
+  const cardSurface = useThemeColor({ light: '#FFFFFF', dark: '#111827' }, 'background');
+  const muted = useThemeColor({ light: '#6A6A6A', dark: '#d1d5db' }, 'tabIconDefault');
+  const metadata = useThemeColor({ light: '#9AA0A6', dark: '#9ca3af' }, 'tabIconDefault');
+  const accent = useThemeColor({ light: '#3B82F6', dark: '#7aa2ff' }, 'tint');
+  const helperSurface = useThemeColor({ light: '#EEF3FF', dark: '#1f2537' }, 'background');
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <ThemedView style={[styles.sectionCard, { backgroundColor: cardSurface }]}>
+    <ScrollView
+      style={{ backgroundColor: pageBackground }}
+      contentContainerStyle={styles.container}
+    >
+      <ThemedView style={[styles.sectionCard, styles.cardShadow, { backgroundColor: cardSurface }]}>
         <View style={styles.sectionHeader}>
-          <ThemedText type="subtitle">Preferred Fuel Type</ThemedText>
-          <ThemedText style={[styles.sectionCaption, { color: muted }]}>
+          <ThemedText type="subtitle" style={styles.sectionTitle}>
+            Preferred Fuel Type
+          </ThemedText>
+          <ThemedText style={[styles.sectionCaption, { color: metadata }]}>
             Personalize price surfacing and alerts.
           </ThemedText>
         </View>
@@ -56,7 +63,7 @@ export default function SettingsScreen() {
               <ThemedText
                 style={[
                   styles.gradeChipLabel,
-                  { color: fuelGrade === grade ? '#ffffff' : '#111827' },
+                  { color: fuelGrade === grade ? '#ffffff' : '#1A1A1A' },
                 ]}
               >
                 {grade === 'regular'
@@ -70,15 +77,15 @@ export default function SettingsScreen() {
         </View>
       </ThemedView>
 
-      <ThemedView style={[styles.sectionCard, { backgroundColor: cardSurface }]}>
-        <ThemedText type="subtitle">Map Options</ThemedText>
+      <ThemedView style={[styles.sectionCard, styles.cardShadow, { backgroundColor: cardSurface }]}>
+        <ThemedText type="subtitle" style={styles.sectionTitle}>Map Options</ThemedText>
         <SettingRow
           label="Dark Mode"
           description="Match device setting or force a theme"
           value={darkMode}
           onValueChange={setDarkMode}
           accent={accent}
-          muted={muted}
+          muted={metadata}
         />
         <SettingRow
           label="Show Traffic"
@@ -86,7 +93,7 @@ export default function SettingsScreen() {
           value={showTraffic}
           onValueChange={setShowTraffic}
           accent={accent}
-          muted={muted}
+          muted={metadata}
         />
         <SettingRow
           label="Show Only Open Stations"
@@ -94,17 +101,17 @@ export default function SettingsScreen() {
           value={showOnlyOpenStations}
           onValueChange={setShowOnlyOpenStations}
           accent={accent}
-          muted={muted}
+          muted={metadata}
         />
       </ThemedView>
 
-      <ThemedView style={[styles.sectionCard, { backgroundColor: cardSurface }]}>
-        <ThemedText type="subtitle">App Info</ThemedText>
+      <ThemedView style={[styles.sectionCard, styles.cardShadow, { backgroundColor: cardSurface }]}>
+        <ThemedText type="subtitle" style={styles.sectionTitle}>App Info</ThemedText>
         {infoLinks.map((link) => (
           <Pressable key={link.id} style={styles.linkRow}>
             <View>
               <ThemedText type="defaultSemiBold">{link.label}</ThemedText>
-              <ThemedText style={[styles.linkCaption, { color: muted }]}>{link.caption}</ThemedText>
+              <ThemedText style={[styles.linkCaption, { color: metadata }]}>{link.caption}</ThemedText>
             </View>
             <Ionicons name="chevron-forward" size={18} color={muted} />
           </Pressable>
@@ -126,7 +133,7 @@ type SettingRowProps = {
 const SettingRow = ({ label, description, value, onValueChange, accent, muted }: SettingRowProps) => (
   <View style={styles.settingRow}>
     <View style={styles.settingCopy}>
-      <ThemedText type="defaultSemiBold">{label}</ThemedText>
+      <ThemedText style={styles.settingLabel}>{label}</ThemedText>
       {description && (
         <ThemedText style={[styles.settingDescription, { color: muted }]}>{description}</ThemedText>
       )}
@@ -134,26 +141,38 @@ const SettingRow = ({ label, description, value, onValueChange, accent, muted }:
     <Switch
       value={value}
       onValueChange={onValueChange}
-      trackColor={{ false: 'rgba(148,163,184,0.4)', true: accent }}
+      trackColor={{ false: '#D0D5DD', true: accent }}
       thumbColor="#ffffff"
-      ios_backgroundColor="rgba(148,163,184,0.4)"
+      ios_backgroundColor="#D0D5DD"
     />
   </View>
 );
 
 const styles = StyleSheet.create({
   container: {
-    padding: 20,
-    gap: 20,
+    paddingHorizontal: 20,
+    paddingTop: 24,
     paddingBottom: 40,
+    gap: 24,
+  },
+  cardShadow: {
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 3,
   },
   sectionCard: {
     padding: 20,
-    borderRadius: 24,
-    gap: 16,
+    borderRadius: 16,
+    gap: 20,
   },
   sectionHeader: {
-    gap: 6,
+    gap: 8,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1A1A1A',
   },
   sectionCaption: {
     fontSize: 14,
@@ -165,36 +184,44 @@ const styles = StyleSheet.create({
   },
   gradeChip: {
     flex: 1,
-    borderRadius: 18,
+    borderRadius: 999,
     paddingVertical: 12,
     alignItems: 'center',
   },
   gradeChipLabel: {
     fontWeight: '600',
+    fontSize: 15,
   },
   settingRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 16,
+    paddingVertical: 16,
   },
   settingCopy: {
     flex: 1,
-    gap: 4,
+    gap: 6,
+  },
+  settingLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1A1A1A',
   },
   settingDescription: {
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: 14,
+    lineHeight: 20,
   },
   linkRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 14,
+    paddingVertical: 16,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(148,163,184,0.2)',
+    borderColor: '#E4E7EC',
   },
   linkCaption: {
     fontSize: 13,
+    marginTop: 2,
   },
 });

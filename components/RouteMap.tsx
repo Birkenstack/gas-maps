@@ -101,26 +101,38 @@ const RouteMap = ({ route, selectedStops }: RouteMapProps) => {
   const originCoordinate: LatLng | null = (route?.origin?.coordinates as LatLng) ?? null;
   const destinationCoordinate: LatLng | null = (route?.destination?.coordinates as LatLng) ?? null;
 
-  const allCoordinates = useMemo<LatLng[]>(() => {
-    if (!route) return [];
-    const candidates: Array<LatLng | null | undefined> = [
-      originCoordinate,
-      ...(route.polyline ?? []),
-      destinationCoordinate,
-    ];
-    return candidates.filter(validCoordinate);
-  }, [route, originCoordinate, destinationCoordinate]);
+  const hasOrigin = validCoordinate(originCoordinate);
+  const hasDestination = validCoordinate(destinationCoordinate);
 
-  const region = useMemo(() => {
-    if (!route || allCoordinates.length === 0) {
-      return defaultRegion;
+  const mapRegion = useMemo(() => {
+    if (hasOrigin && hasDestination && originCoordinate && destinationCoordinate) {
+      return buildRegionFromCoordinates([originCoordinate, destinationCoordinate]);
     }
-    return buildRegionFromCoordinates(allCoordinates);
-  }, [route, allCoordinates]);
+    if (hasOrigin && originCoordinate) {
+      return {
+        latitude: originCoordinate.latitude,
+        longitude: originCoordinate.longitude,
+        latitudeDelta: defaultRegion.latitudeDelta / 2,
+        longitudeDelta: defaultRegion.longitudeDelta / 2,
+      };
+    }
+    if (hasDestination && destinationCoordinate) {
+      return {
+        latitude: destinationCoordinate.latitude,
+        longitude: destinationCoordinate.longitude,
+        latitudeDelta: defaultRegion.latitudeDelta / 2,
+        longitudeDelta: defaultRegion.longitudeDelta / 2,
+      };
+    }
+    return defaultRegion;
+  }, [hasOrigin, hasDestination, originCoordinate, destinationCoordinate]);
 
   const stops = useMemo(() => {
     if (!route) return [];
-    const openStops = showOnlyOpenStations ? route.stops.filter((stop) => stop.isOpen !== false) : route.stops;
+    const baseStops = Array.isArray(route?.stops) ? route.stops : [];
+    const openStops = showOnlyOpenStations
+      ? baseStops.filter((stop) => stop.isOpen !== false)
+      : baseStops;
     return openStops.filter((stop) => validCoordinate(stop.coordinates));
   }, [route, showOnlyOpenStations]);
 
@@ -132,10 +144,7 @@ const RouteMap = ({ route, selectedStops }: RouteMapProps) => {
       .filter((station) => validCoordinate(station.coordinates));
   }, [selectedStops]);
 
-  const hasRequiredAnchors =
-    !!route && validCoordinate(originCoordinate) && validCoordinate(destinationCoordinate);
-
-  if (!route || !hasRequiredAnchors) {
+  if (!route) {
     return <View style={styles.wrapper} />;
   }
 
@@ -143,15 +152,12 @@ const RouteMap = ({ route, selectedStops }: RouteMapProps) => {
     <View style={styles.wrapper}>
       <MapView
         style={styles.map}
-        initialRegion={region}
+        initialRegion={mapRegion}
         customMapStyle={colorScheme === 'dark' ? darkMapStyle : lightMapStyle}
         showsCompass={false}
         showsPointsOfInterest={false}
         showsBuildings={false}
         toolbarEnabled={false}
-        scrollEnabled
-        zoomEnabled
-        rotateEnabled
         pitchEnabled={false}
         showsTraffic={showTraffic}
         showsUserLocation
@@ -164,7 +170,9 @@ const RouteMap = ({ route, selectedStops }: RouteMapProps) => {
             strokeWidth={5}
           />
         )}
-        <Marker coordinate={originCoordinate} title={route.origin.label} pinColor={accentColor} />
+        {hasOrigin && originCoordinate && (
+          <Marker coordinate={originCoordinate} title={route.origin.label} pinColor={accentColor} />
+        )}
         {stops.map((stop) => (
           <Marker
             key={stop.id}
@@ -192,11 +200,13 @@ const RouteMap = ({ route, selectedStops }: RouteMapProps) => {
             </View>
           </Marker>
         ))}
-        <Marker
-          coordinate={destinationCoordinate}
-          title={route.destination.label}
-          pinColor={destinationColor}
-        />
+        {hasDestination && destinationCoordinate && (
+          <Marker
+            coordinate={destinationCoordinate}
+            title={route.destination.label}
+            pinColor={destinationColor}
+          />
+        )}
       </MapView>
     </View>
   );

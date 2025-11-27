@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View, useColorScheme } from 'react-native';
 
 import RouteMap from '@/components/RouteMap';
 import { ThemedText } from '@/components/themed-text';
@@ -10,7 +10,6 @@ import { MIDLAND_TO_AUSTIN_ROUTE } from '@/constants/sample-stops';
 import { getBrandStyle } from '@/constants/station-brand';
 import { usePreferences } from '@/contexts/preferences-context';
 import { useFuelPrices } from '@/hooks/use-fuel-prices';
-import { useThemeColor } from '@/hooks/use-theme-color';
 import {
   addStopToPlan,
   fetchRoute,
@@ -37,6 +36,25 @@ const filterChips: { id: FilterId; label: string }[] = [
   { id: 'detour', label: '< 0.5 mi detour' },
 ];
 
+const Colors = {
+  light: {
+    background: '#F7F7F7',
+    card: '#FFFFFF',
+    primaryText: '#1A1A1A',
+    secondaryText: '#6A6A6A',
+    metadataText: '#9AA0A6',
+    accent: '#3B82F6',
+  },
+  dark: {
+    background: '#0D1117',
+    card: '#161B22',
+    primaryText: '#E6E6E6',
+    secondaryText: '#9EA6B5',
+    metadataText: '#7D8694',
+    accent: '#3B82F6',
+  },
+} as const;
+
 const fuelGradeLabel = {
   regular: 'Regular',
   midgrade: 'Midgrade',
@@ -44,28 +62,23 @@ const fuelGradeLabel = {
 } as const;
 
 const priceValue = (stop: SampleStop, grade: FuelGrade) => {
-  // 1) Prefer a specific fuelBreakdown price if available
   const breakdown = stop.fuelBreakdown?.[grade];
   if (typeof breakdown === 'number') {
     return breakdown;
   }
 
-  // 2) Fall back to stop.price, which may be a number or a string
   const rawPrice: unknown = (stop as any).price;
 
   if (typeof rawPrice === 'number') {
-    // API already returns a numeric price (e.g. 2.89)
     return rawPrice;
   }
 
   if (typeof rawPrice === 'string') {
-    // Handle values like \"$2.89\" or \"2.89\"
     const cleaned = rawPrice.replace('$', '').trim();
     const parsed = Number(cleaned);
     return Number.isNaN(parsed) ? 0 : parsed;
   }
 
-  // 3) Fallback if price is missing/invalid
   return 0;
 };
 
@@ -81,6 +94,15 @@ export default function ExploreScreen() {
 
   const { showOnlyOpenStations, fuelGrade } = usePreferences();
   const fuelPriceState = useFuelPrices(stops);
+  const colorScheme = useColorScheme() ?? 'light';
+  const theme = Colors[colorScheme];
+  const cardChromeStyle = colorScheme === 'dark' ? styles.darkCardBorder : styles.lightCardShadow;
+  const helperSurface = colorScheme === 'dark' ? '#202A38' : '#EEF3FF';
+  const metaPillBackground = colorScheme === 'dark' ? 'rgba(59,130,246,0.25)' : 'rgba(59,130,246,0.12)';
+  const ratingBackground = colorScheme === 'dark' ? 'rgba(251,191,36,0.25)' : '#FFF7DA';
+  const noteBackground = colorScheme === 'dark' ? '#1F2633' : '#EEF3FF';
+  const openStatusBackground = colorScheme === 'dark' ? 'rgba(16,185,129,0.25)' : 'rgba(16,185,129,0.15)';
+  const closedStatusBackground = colorScheme === 'dark' ? 'rgba(239,68,68,0.25)' : 'rgba(239,68,68,0.15)';
 
   useEffect(() => {
     async function loadData() {
@@ -92,9 +114,6 @@ export default function ExploreScreen() {
           fetchStopsForRoute('Midland, TX', 'Austin, TX'),
           fetchSelectedStops(),
         ]);
-        console.log('Fetched route:', routeData);
-        console.log('Fetched stops:', stopsData);
-        console.log('Fetched selected stops:', selectionData);
 
         setRoute(routeData);
         setStops(stopsData);
@@ -120,15 +139,6 @@ export default function ExploreScreen() {
 
     loadData();
   }, []);
-
-  const mutedTextColor = useThemeColor({ light: '#6b7280', dark: '#9ca3af' }, 'tabIconDefault');
-  const cardSurface = useThemeColor({ light: '#ffffff', dark: '#111827' }, 'background');
-  const accentColor = useThemeColor({ light: '#2563eb', dark: '#7aa2ff' }, 'tint');
-  const borderColor = useThemeColor(
-    { light: 'rgba(15,23,42,0.08)', dark: 'rgba(255,255,255,0.12)' },
-    'tabIconDefault'
-  );
-  const helperSurface = useThemeColor({ light: '#f3f4ff', dark: '#1c2537' }, 'background');
 
   const preferenceStops = useMemo(
     () => (showOnlyOpenStations ? stops.filter((stop) => stop.isOpen !== false) : stops),
@@ -188,12 +198,10 @@ export default function ExploreScreen() {
           delete next[stopKey];
           return next;
         });
-        console.log('Removed stop from plan:', existing);
         return;
       }
 
       const result = await addStopToPlan(stopKey, routeId);
-      console.log('Added stop to plan:', result);
       setSelectedStops((prev) => ({ ...prev, [stopKey]: result }));
     } catch (err) {
       console.error('Failed to toggle stop', err);
@@ -209,57 +217,62 @@ export default function ExploreScreen() {
         : 'Offline price cache';
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <ThemedView style={[styles.heroCard, { backgroundColor: cardSurface }]}>
+    <ScrollView style={{ backgroundColor: theme.background }} contentContainerStyle={styles.container}>
+      <ThemedView style={[styles.heroCard, cardChromeStyle, { backgroundColor: theme.card }]}>
         <View style={styles.heroHeader}>
-          <ThemedText type="title">Along Route</ThemedText>
-          <ThemedText style={[styles.heroSubheading, { color: mutedTextColor }]}>
+          <ThemedText type="title" style={[styles.heroTitle, { color: theme.primaryText }]}>
+            Along Route
+          </ThemedText>
+          <ThemedText style={[styles.heroSubheading, { color: theme.secondaryText }]}>
             Curated stations synced to your Midland → Austin path.
           </ThemedText>
         </View>
         <View style={styles.heroMetaRow}>
           <View style={[styles.heroMetaCard, { backgroundColor: helperSurface }]}>
-            <ThemedText style={styles.heroMetaLabel}>Drive Time</ThemedText>
-            <ThemedText style={styles.heroMetaValue}>
+            <ThemedText style={[styles.heroMetaLabel, { color: theme.secondaryText }]}>Drive Time</ThemedText>
+            <ThemedText style={[styles.heroMetaValue, { color: theme.primaryText }]}>
               {driveHours}h {driveLeftover.toString().padStart(2, '0')}m
             </ThemedText>
-            <ThemedText style={[styles.heroMetaCaption, { color: mutedTextColor }]}>
-              With rest + fuel breaks
-            </ThemedText>
+            <ThemedText style={[styles.heroMetaCaption, { color: theme.secondaryText }]}>With rest + fuel breaks</ThemedText>
           </View>
           <View style={[styles.heroMetaCard, { backgroundColor: helperSurface }]}>
-            <ThemedText style={styles.heroMetaLabel}>Stops</ThemedText>
-            <ThemedText style={styles.heroMetaValue}>{stops.length}</ThemedText>
-            <ThemedText style={[styles.heroMetaCaption, { color: mutedTextColor }]}>
-              Swap in alternates
-            </ThemedText>
+            <ThemedText style={[styles.heroMetaLabel, { color: theme.secondaryText }]}>Stops</ThemedText>
+            <ThemedText style={[styles.heroMetaValue, { color: theme.primaryText }]}>{stops.length}</ThemedText>
+            <ThemedText style={[styles.heroMetaCaption, { color: theme.secondaryText }]}>Swap in alternates</ThemedText>
           </View>
           <View style={[styles.heroMetaCard, { backgroundColor: helperSurface }]}>
-            <ThemedText style={styles.heroMetaLabel}>Savings</ThemedText>
-            <ThemedText style={styles.heroMetaValue}>~$12</ThemedText>
-            <ThemedText style={[styles.heroMetaCaption, { color: mutedTextColor }]}>
-              Per tank plan
-            </ThemedText>
+            <ThemedText style={[styles.heroMetaLabel, { color: theme.secondaryText }]}>Savings</ThemedText>
+            <ThemedText style={[styles.heroMetaValue, { color: theme.primaryText }]}>~$12</ThemedText>
+            <ThemedText style={[styles.heroMetaCaption, { color: theme.secondaryText }]}>Per tank plan</ThemedText>
           </View>
         </View>
 
-        <View style={styles.heroMapWrapper}>
-          <RouteMap route={route} />
+        <View style={[styles.heroMapWrapper, cardChromeStyle, { backgroundColor: theme.card }]}>
+          <View style={styles.heroMapContent}>
+            <RouteMap route={route} />
+          </View>
         </View>
       </ThemedView>
 
       <View style={styles.toolbar}>
-        <Pressable style={[styles.sortButton, { borderColor }]} onPress={cycleSort}>
-          <Ionicons name="swap-vertical" size={18} color={accentColor} />
-          <ThemedText style={styles.sortLabel}>Sort by {activeSort.label}</ThemedText>
-          <Ionicons name="chevron-down" size={18} color={accentColor} />
+        <Pressable
+          style={[
+            styles.sortButton,
+            cardChromeStyle,
+            { backgroundColor: theme.card, borderColor: colorScheme === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.06)' },
+          ]}
+          onPress={cycleSort}
+        >
+          <Ionicons name="swap-vertical" size={18} color={theme.accent} />
+          <ThemedText style={[styles.sortLabel, { color: theme.primaryText }]}>Sort by {activeSort.label}</ThemedText>
+          <Ionicons name="chevron-down" size={18} color={theme.accent} />
         </Pressable>
         <Pressable style={[styles.viewButton, { backgroundColor: helperSurface }]}>
-          <Ionicons name="map-outline" size={18} color={accentColor} />
-          <ThemedText style={[styles.viewButtonLabel, { color: accentColor }]}>Map</ThemedText>
+          <Ionicons name="map-outline" size={18} color={theme.accent} />
+          <ThemedText style={[styles.viewButtonLabel, { color: theme.primaryText }]}>Map</ThemedText>
         </Pressable>
       </View>
-      <ThemedText style={[styles.priceStatusText, { color: mutedTextColor }]}>
+      <ThemedText style={[styles.priceStatusText, { color: theme.secondaryText }]}>
         {priceStatusLabel} • {fuelGradeLabel[fuelGrade]}
       </ThemedText>
 
@@ -271,15 +284,15 @@ export default function ExploreScreen() {
             style={[
               styles.filterChip,
               {
-                backgroundColor: filter === chip.id ? accentColor : 'transparent',
-                borderColor,
+                backgroundColor: filter === chip.id ? theme.accent : theme.card,
+                borderColor: filter === chip.id ? theme.accent : 'transparent',
               },
             ]}
           >
             <ThemedText
               style={[
                 styles.filterChipLabel,
-                { color: filter === chip.id ? '#ffffff' : mutedTextColor },
+                { color: filter === chip.id ? theme.primaryText : theme.secondaryText },
               ]}
             >
               {chip.label}
@@ -293,102 +306,87 @@ export default function ExploreScreen() {
         const stopKey = String(stop.id ?? '');
         const isSelected = stopKey ? Boolean(selectedStops[stopKey]) : false;
         return (
-          <ThemedView
-            key={stop.id}
-            style={[styles.stopCard, { backgroundColor: cardSurface, borderColor }]}
-          >
+          <ThemedView key={stop.id} style={[styles.stopCard, cardChromeStyle, { backgroundColor: theme.card }]}>
             <View style={styles.stopHeader}>
               <View style={styles.brandRow}>
                 <View style={[styles.brandBadge, { backgroundColor: brand.background }]}>
                   <ThemedText style={styles.brandEmoji}>{brand.emoji}</ThemedText>
                 </View>
                 <View>
-                  <ThemedText type="defaultSemiBold">{stop.name}</ThemedText>
-                  <ThemedText style={[styles.stopCity, { color: mutedTextColor }]}>
-                    {stop.city}
-                  </ThemedText>
+                  <ThemedText style={[styles.stopName, { color: theme.primaryText }]}>{stop.name}</ThemedText>
+                  <ThemedText style={[styles.stopCity, { color: theme.secondaryText }]}>{stop.city}</ThemedText>
                 </View>
               </View>
               <View style={styles.priceStack}>
-                <ThemedText style={styles.priceValue}>
+                <ThemedText style={[styles.priceValue, { color: theme.primaryText }]}>
                   {formatFuelPrice(stop, fuelGrade, stationPrices)}
                 </ThemedText>
-                <ThemedText style={[styles.priceCaption, { color: mutedTextColor }]}>
-                  per gal
-                </ThemedText>
+                <ThemedText style={[styles.priceCaption, { color: theme.secondaryText }]}>per gal</ThemedText>
               </View>
             </View>
 
             <View style={styles.metaRow}>
-              <View style={styles.metaPill}>
-                <Ionicons name="locate" size={14} color={accentColor} />
-                <ThemedText style={[styles.metaLabel, { color: accentColor }]}>
+              <View style={[styles.metaPill, { backgroundColor: metaPillBackground }]}>
+                <Ionicons name="locate" size={14} color={theme.accent} />
+                <ThemedText style={[styles.metaLabel, { color: theme.secondaryText }]}>
                   {formatDistance(stop.distanceMiles)} away
                 </ThemedText>
               </View>
-              <View style={styles.metaPill}>
-                <Ionicons name="git-branch" size={14} color={accentColor} />
-                <ThemedText style={[styles.metaLabel, { color: accentColor }]}>
+              <View style={[styles.metaPill, { backgroundColor: metaPillBackground }]}>
+                <Ionicons name="git-branch" size={14} color={theme.accent} />
+                <ThemedText style={[styles.metaLabel, { color: theme.secondaryText }]}>
                   {stop.distanceOffsetMiles} mi detour
                 </ThemedText>
               </View>
               <View
                 style={[
                   styles.statusPill,
-                  { backgroundColor: stop.isOpen ? 'rgba(34,197,94,0.14)' : 'rgba(248,113,113,0.14)' },
+                  { backgroundColor: stop.isOpen ? openStatusBackground : closedStatusBackground },
                 ]}
               >
-                <ThemedText
-                  style={[
-                    styles.statusPillLabel,
-                    { color: stop.isOpen ? '#15803d' : '#b91c1c' },
-                  ]}
-                >
+                <ThemedText style={[styles.statusPillLabel, { color: theme.primaryText }]}>
                   {stop.isOpen ? 'Open' : 'Closed'}
                 </ThemedText>
               </View>
             </View>
 
             <View style={styles.metaRow}>
-              <View style={styles.ratingPill}>
+              <View style={[styles.ratingPill, { backgroundColor: ratingBackground }]}>
                 <Ionicons name="star" size={14} color="#fbbf24" />
-                <ThemedText style={styles.ratingLabel}>{stop.rating?.toFixed(1) ?? '4.5'}</ThemedText>
+                <ThemedText style={[styles.ratingLabel, { color: theme.primaryText }]}>
+                  {stop.rating?.toFixed(1) ?? '4.5'}
+                </ThemedText>
               </View>
-              <ThemedText style={[styles.updatedText, { color: mutedTextColor }]}>
+              <ThemedText style={[styles.updatedText, { color: theme.secondaryText }]}>
                 {formatUpdatedLabel(stationPrices[stop.id]?.updatedAt, stop.lastUpdatedMinutes)}
               </ThemedText>
             </View>
 
             {stop.note && (
-              <View style={[styles.noteBanner, { backgroundColor: helperSurface }]}>
-                <Ionicons name="alert-circle" size={16} color={accentColor} />
-                <ThemedText style={styles.noteText}>{stop.note}</ThemedText>
+              <View style={[styles.noteBanner, { backgroundColor: noteBackground }]}>
+                <Ionicons name="alert-circle" size={16} color={theme.accent} />
+                <ThemedText style={[styles.noteText, { color: theme.primaryText }]}>{stop.note}</ThemedText>
               </View>
             )}
 
             <View style={styles.stopFooter}>
               <View>
-                <ThemedText style={styles.footerLabel}>
+                <ThemedText style={[styles.footerLabel, { color: theme.primaryText }]}>
                   ETA {stop.etaMinutes} min • Rewards ready
                 </ThemedText>
-                <ThemedText style={[styles.footerCaption, { color: mutedTextColor }]}>
+                <ThemedText style={[styles.footerCaption, { color: theme.secondaryText }]}>
                   Includes {stop.amenities?.join(', ') ?? 'standard amenities'}
                 </ThemedText>
               </View>
               <Pressable
                 style={[
                   styles.stopButton,
-                  { backgroundColor: accentColor },
+                  { backgroundColor: theme.accent },
                   isSelected && styles.stopButtonSelected,
                 ]}
                 onPress={() => handleToggleStop(stop)}
               >
-                <ThemedText
-                  style={[
-                    styles.stopButtonLabel,
-                    isSelected && styles.stopButtonLabelSelected,
-                  ]}
-                >
+                <ThemedText style={[styles.stopButtonLabel, { color: theme.primaryText }]}>
                   {isSelected ? 'Added' : 'Add Stop'}
                 </ThemedText>
               </Pressable>
@@ -402,17 +400,32 @@ export default function ExploreScreen() {
 
 const styles = StyleSheet.create({
   container: {
-    padding: 20,
-    gap: 20,
-    paddingBottom: 32,
+    paddingHorizontal: 20,
+    paddingTop: 24,
+    paddingBottom: 40,
+    gap: 24,
+  },
+  lightCardShadow: {
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 3,
+  },
+  darkCardBorder: {
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.05)',
   },
   heroCard: {
     padding: 20,
-    borderRadius: 28,
-    gap: 18,
+    borderRadius: 20,
+    gap: 20,
   },
   heroHeader: {
-    gap: 8,
+    gap: 12,
+  },
+  heroTitle: {
+    fontSize: 26,
+    fontWeight: '700',
   },
   heroSubheading: {
     fontSize: 16,
@@ -425,22 +438,26 @@ const styles = StyleSheet.create({
   heroMetaCard: {
     flex: 1,
     borderRadius: 16,
-    padding: 14,
+    padding: 16,
     gap: 6,
   },
   heroMetaLabel: {
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '600',
   },
   heroMetaValue: {
-    fontSize: 22,
+    fontSize: 24,
     fontWeight: '700',
   },
   heroMetaCaption: {
-    fontSize: 12,
+    fontSize: 13,
   },
   heroMapWrapper: {
-    borderRadius: 24,
+    borderRadius: 20,
+    padding: 12,
+  },
+  heroMapContent: {
+    borderRadius: 16,
     overflow: 'hidden',
   },
   toolbar: {
@@ -474,18 +491,18 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   priceStatusText: {
-    fontSize: 12,
+    fontSize: 14,
     letterSpacing: 0.5,
     textTransform: 'uppercase',
   },
   filterRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
+    gap: 12,
   },
   filterChip: {
     borderRadius: 999,
-    paddingHorizontal: 14,
+    paddingHorizontal: 16,
     paddingVertical: 8,
     borderWidth: StyleSheet.hairlineWidth,
   },
@@ -494,10 +511,9 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   stopCard: {
-    borderRadius: 24,
-    padding: 18,
-    gap: 14,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 16,
+    padding: 20,
+    gap: 16,
   },
   stopHeader: {
     flexDirection: 'row',
@@ -520,14 +536,19 @@ const styles = StyleSheet.create({
   brandEmoji: {
     fontSize: 24,
   },
+  stopName: {
+    fontSize: 18,
+    fontWeight: '700',
+  },
   stopCity: {
     fontSize: 14,
   },
   priceStack: {
     alignItems: 'flex-end',
+    gap: 2,
   },
   priceValue: {
-    fontSize: 24,
+    fontSize: 26,
     fontWeight: '700',
   },
   priceCaption: {
@@ -535,21 +556,21 @@ const styles = StyleSheet.create({
   },
   metaRow: {
     flexDirection: 'row',
-    gap: 10,
+    gap: 12,
     flexWrap: 'wrap',
     alignItems: 'center',
+    marginTop: 4,
   },
   metaPill: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    paddingHorizontal: 10,
+    paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 999,
-    backgroundColor: 'rgba(37,99,235,0.08)',
   },
   metaLabel: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '600',
   },
   statusPill: {
@@ -566,9 +587,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: 'rgba(251,191,36,0.12)',
     borderRadius: 999,
-    paddingHorizontal: 10,
+    paddingHorizontal: 12,
     paddingVertical: 6,
   },
   ratingLabel: {
@@ -576,13 +596,13 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   updatedText: {
-    fontSize: 13,
+    fontSize: 14,
   },
   noteBanner: {
     flexDirection: 'row',
     gap: 8,
     alignItems: 'center',
-    borderRadius: 14,
+    borderRadius: 12,
     padding: 12,
   },
   noteText: {
@@ -594,26 +614,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 12,
+    marginTop: 12,
   },
   footerLabel: {
     fontWeight: '600',
+    fontSize: 14,
   },
   footerCaption: {
     fontSize: 13,
   },
   stopButton: {
-    borderRadius: 14,
-    paddingHorizontal: 18,
+    borderRadius: 16,
+    paddingHorizontal: 20,
     paddingVertical: 12,
   },
   stopButtonSelected: {
-    opacity: 0.85,
+    opacity: 0.9,
   },
   stopButtonLabel: {
-    color: '#ffffff',
     fontWeight: '700',
-  },
-  stopButtonLabelSelected: {
-    color: '#e0e7ff',
+    fontSize: 16,
   },
 });

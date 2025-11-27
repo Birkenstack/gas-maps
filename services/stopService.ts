@@ -21,7 +21,7 @@ export type SelectedStopRecord = {
 
 export async function fetchStopsForRoute(
   origin: string,
-  destination: string
+  destination: string 
 ): Promise<SampleStop[]> {
   const params = new URLSearchParams({ origin, destination });
 

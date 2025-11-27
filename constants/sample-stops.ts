@@ -12,7 +12,7 @@ export type SampleStop = {
   name: string;
   brand?: string;
   city: string;
-  price: string;
+  price: string | number;
   fuelBreakdown?: FuelBreakdown;
   etaMinutes: number;
   distanceOffsetMiles: number;
@@ -27,8 +27,7 @@ export type SampleStop = {
 
 export type SampleRouteEndpoint = {
   label: string;
-  city: string;
-  coordinates: Coordinates;
+  coords: Coordinates;
 };
 
 export type SampleRoute = {
@@ -39,6 +38,12 @@ export type SampleRoute = {
   destination: SampleRouteEndpoint;
   polyline: Coordinates[];
   stops: SampleStop[];
+  durationMinutes: number;
+  etaMinutes: number;
+  distanceMiles: number;
+  path?: Coordinates[];
+  distanceText?: string;
+  durationText?: string;
 };
 
 export const MIDLAND_TO_AUSTIN_STOPS: SampleStop[] = [
@@ -133,14 +138,22 @@ export const MIDLAND_TO_AUSTIN_ROUTE: SampleRoute = {
   summary: 'Scenic 5-hour stretch across West Texas with curated fuel stops along I-20 and US-183.',
   origin: {
     label: 'Midland Downtown',
-    city: 'Midland, TX',
-    coordinates: { latitude: 31.9973, longitude: -102.0779 },
+    coords: { latitude: 31.9973, longitude: -102.0779 },
   },
   destination: {
     label: 'Austin Capitol',
-    city: 'Austin, TX',
-    coordinates: { latitude: 30.2672, longitude: -97.7431 },
+    coords: { latitude: 30.2672, longitude: -97.7431 },
   },
+  durationMinutes: 320,
+  etaMinutes: 320,
+  distanceMiles: 345,
+  durationText: '5h 20m',
+  distanceText: '345 miles',
+  path: [
+    { latitude: 31.9973, longitude: -102.0779 },
+    { latitude: 31.8582, longitude: -102.2985 },
+    { latitude: 31.8455, longitude: -102.3381 },
+  ],
   polyline: [
     { latitude: 31.9973, longitude: -102.0779 },
     { latitude: 31.8582, longitude: -102.2985 },
