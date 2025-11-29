@@ -1,6 +1,6 @@
 import { memo, useMemo } from 'react';
 import { StyleSheet, View } from 'react-native';
-import MapView, { Marker, Polyline } from 'react-native-maps';
+import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 
 import type { SampleRoute } from '@/constants/sample-stops';
 import { usePreferences } from '@/contexts/preferences-context';
@@ -152,6 +152,7 @@ const RouteMap = ({ route, selectedStops }: RouteMapProps) => {
     <View style={styles.wrapper}>
       <MapView
         style={styles.map}
+        provider={PROVIDER_GOOGLE}
         initialRegion={mapRegion}
         customMapStyle={colorScheme === 'dark' ? darkMapStyle : lightMapStyle}
         showsCompass={false}

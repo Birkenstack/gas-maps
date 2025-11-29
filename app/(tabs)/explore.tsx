@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View, useColorScheme } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import RouteMap from '@/components/RouteMap';
 import { ThemedText } from '@/components/themed-text';
@@ -10,6 +10,7 @@ import { MIDLAND_TO_AUSTIN_ROUTE } from '@/constants/sample-stops';
 import { getBrandStyle } from '@/constants/station-brand';
 import { usePreferences } from '@/contexts/preferences-context';
 import { useFuelPrices } from '@/hooks/use-fuel-prices';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import {
   addStopToPlan,
   fetchRoute,

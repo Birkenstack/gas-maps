@@ -29,6 +29,7 @@ export default function SettingsScreen() {
 
   const pageBackground = useThemeColor({ light: '#F7F7F7', dark: '#030712' }, 'background');
   const cardSurface = useThemeColor({ light: '#FFFFFF', dark: '#111827' }, 'background');
+  const primaryText = useThemeColor({ light: '#1A1A1A', dark: '#F9FAFB' }, 'text');
   const muted = useThemeColor({ light: '#6A6A6A', dark: '#d1d5db' }, 'tabIconDefault');
   const metadata = useThemeColor({ light: '#9AA0A6', dark: '#9ca3af' }, 'tabIconDefault');
   const accent = useThemeColor({ light: '#3B82F6', dark: '#7aa2ff' }, 'tint');
@@ -41,7 +42,7 @@ export default function SettingsScreen() {
     >
       <ThemedView style={[styles.sectionCard, styles.cardShadow, { backgroundColor: cardSurface }]}>
         <View style={styles.sectionHeader}>
-          <ThemedText type="subtitle" style={styles.sectionTitle}>
+          <ThemedText type="subtitle" style={[styles.sectionTitle, { color: primaryText }]}>
             Preferred Fuel Type
           </ThemedText>
           <ThemedText style={[styles.sectionCaption, { color: metadata }]}>
@@ -63,7 +64,7 @@ export default function SettingsScreen() {
               <ThemedText
                 style={[
                   styles.gradeChipLabel,
-                  { color: fuelGrade === grade ? '#ffffff' : '#1A1A1A' },
+                  { color: fuelGrade === grade ? '#ffffff' : primaryText },
                 ]}
               >
                 {grade === 'regular'
@@ -78,7 +79,7 @@ export default function SettingsScreen() {
       </ThemedView>
 
       <ThemedView style={[styles.sectionCard, styles.cardShadow, { backgroundColor: cardSurface }]}>
-        <ThemedText type="subtitle" style={styles.sectionTitle}>Map Options</ThemedText>
+        <ThemedText type="subtitle" style={[styles.sectionTitle, { color: primaryText }]}>Map Options</ThemedText>
         <SettingRow
           label="Dark Mode"
           description="Match device setting or force a theme"
@@ -106,7 +107,7 @@ export default function SettingsScreen() {
       </ThemedView>
 
       <ThemedView style={[styles.sectionCard, styles.cardShadow, { backgroundColor: cardSurface }]}>
-        <ThemedText type="subtitle" style={styles.sectionTitle}>App Info</ThemedText>
+        <ThemedText type="subtitle" style={[styles.sectionTitle, { color: primaryText }]}>App Info</ThemedText>
         {infoLinks.map((link) => (
           <Pressable key={link.id} style={styles.linkRow}>
             <View>
@@ -172,7 +173,6 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#1A1A1A',
   },
   sectionCaption: {
     fontSize: 14,
@@ -206,7 +206,6 @@ const styles = StyleSheet.create({
   settingLabel: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#1A1A1A',
   },
   settingDescription: {
     fontSize: 14,

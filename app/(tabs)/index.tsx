@@ -1,4 +1,3 @@
-import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -23,7 +22,6 @@ import { useThemeColor } from '@/hooks/use-theme-color';
 import {
   fetchRoute,
   fetchSelectedStops,
-  removeStopFromPlan,
   type RouteResponse,
   type SelectedStopRecord,
 } from '@/services/stopService';
@@ -45,11 +43,7 @@ const fuelGradeLabel = {
 export default function RoutePlannerScreen() {
   const [destination, setDestination] = useState<string>('');
   const [locationState, setLocationState] = useState<LocationState>({ status: 'idle' });
-  const [planLoading, setPlanLoading] = useState(true);
-  const [planError, setPlanError] = useState<string | null>(null);
   const [selectedStops, setSelectedStops] = useState<SelectedStopRecord[]>([]);
-  const [removingId, setRemovingId] = useState<number | null>(null);
-  const [clearingPlan, setClearingPlan] = useState(false);
   const [routeState, setRouteState] = useState<RouteResponse | null>(null);
   const [routeLoading, setRouteLoading] = useState(true);
   const [routeError, setRouteError] = useState<string | null>(null);
@@ -65,7 +59,6 @@ export default function RoutePlannerScreen() {
     'tabIconDefault'
   );
   const primaryTextColor = useThemeColor({ light: '#1A1A1A', dark: '#F9FAFB' }, 'text');
-  const overlayShadow = useThemeColor({ light: '#0f172a', dark: '#000000' }, 'tabIconDefault');
   const accentColor = useThemeColor({ light: '#3B82F6', dark: '#7aa2ff' }, 'tint');
   const cardSurface = useThemeColor({ light: '#FFFFFF', dark: '#1f2532' }, 'background');
 
@@ -73,6 +66,10 @@ export default function RoutePlannerScreen() {
   const pendingLocation = locationState.status === 'requesting';
   const locationError = locationState.status === 'denied' ? locationState.error : undefined;
   const canStartRoute = (destination?.trim().length ?? 0) > 0 && hasLocation;
+  const originCoordinatesKey =
+    locationState.status === 'ready'
+      ? `${locationState.coords.latitude},${locationState.coords.longitude}`
+      : null;
 
   const handleUseCurrentLocation = useCallback(async () => {
     try {
@@ -103,57 +100,6 @@ export default function RoutePlannerScreen() {
       setLocationState({ status: 'denied', error: message });
     }
   }, []);
-
-  const handleRemoveStop = useCallback(
-    async (selection: SelectedStopRecord) => {
-      if (removingId || clearingPlan) {
-        return;
-      }
-
-      const previous = [...selectedStops];
-      setRemovingId(selection.id);
-      setSelectedStops((current) => current.filter((stop) => stop.id !== selection.id));
-
-      try {
-        await removeStopFromPlan(selection.id);
-      } catch (err) {
-        console.error('Failed to remove stop from plan', err);
-        Alert.alert('Unable to remove stop', 'Please try again.');
-        setSelectedStops(previous);
-      } finally {
-        setRemovingId(null);
-      }
-    },
-    [selectedStops, removingId, clearingPlan]
-  );
-
-  const confirmClearPlan = useCallback(() => {
-    if (!selectedStops.length || clearingPlan) {
-      return;
-    }
-
-    Alert.alert('Clear Tank Plan', 'Clear all stops from Tank Plan?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Clear',
-        style: 'destructive',
-        onPress: async () => {
-          const previous = [...selectedStops];
-          setClearingPlan(true);
-          setSelectedStops([]);
-          try {
-            await Promise.all(previous.map((stop) => removeStopFromPlan(stop.id)));
-          } catch (err) {
-            console.error('Failed to clear plan', err);
-            Alert.alert('Unable to clear plan', 'Please try again.');
-            setSelectedStops(previous);
-          } finally {
-            setClearingPlan(false);
-          }
-        },
-      },
-    ]);
-  }, [selectedStops, clearingPlan]);
 
   const formatDurationLabel = useCallback((minutes?: number | null) => {
     if (minutes == null || Number.isNaN(minutes)) return null;
@@ -215,7 +161,46 @@ export default function RoutePlannerScreen() {
     const baseStops = activeRoute?.stops ?? [];
     return showOnlyOpenStations ? baseStops.filter((stop) => stop.isOpen !== false) : baseStops;
   }, [activeRoute, showOnlyOpenStations]);
+
+  const bestAvailableStop = useMemo(() => {
+    if (!stops.length) return null;
+    const priceValue = (stop: SampleRoute['stops'][number]) => {
+      const breakdown = stop.fuelBreakdown?.[fuelGrade];
+      if (typeof breakdown === 'number') return breakdown;
+      const raw = stop.price;
+      if (typeof raw === 'number') return raw;
+      if (typeof raw === 'string') {
+        const parsed = Number(raw.replace(/[^0-9.]/g, ''));
+        return Number.isNaN(parsed) ? Number.POSITIVE_INFINITY : parsed;
+      }
+      return Number.POSITIVE_INFINITY;
+    };
+    const detourValue = (stop: SampleRoute['stops'][number]) =>
+      typeof stop.distanceOffsetMiles === 'number' ? stop.distanceOffsetMiles : Number.POSITIVE_INFINITY;
+
+    const sorted = [...stops].sort((a, b) => {
+      const detourDiff = detourValue(a) - detourValue(b);
+      if (Math.abs(detourDiff) > 0.01) return detourDiff;
+      return priceValue(a) - priceValue(b);
+    });
+
+    return sorted[0] ?? null;
+  }, [stops, fuelGrade]);
   const stationPrices = fuelPriceState.data;
+  const bestStopPrice = bestAvailableStop
+    ? formatFuelPrice(bestAvailableStop, fuelGrade, stationPrices)
+    : null;
+  const bestStopDistanceLabel =
+    bestAvailableStop && typeof bestAvailableStop.distanceMiles === 'number'
+      ? formatDistance(bestAvailableStop.distanceMiles)
+      : null;
+  const bestStopDetourLabel =
+    bestAvailableStop && typeof bestAvailableStop.distanceOffsetMiles === 'number'
+      ? `${bestAvailableStop.distanceOffsetMiles} mi detour`
+      : null;
+  const bestStopMeta = [bestStopDistanceLabel, bestStopPrice, bestStopDetourLabel]
+    .filter(Boolean)
+    .join(' • ');
   const priceStatusLabel =
     fuelPriceState.status === 'ready'
       ? 'Live prices synced'
@@ -250,12 +235,24 @@ export default function RoutePlannerScreen() {
   }
 
   useEffect(() => {
+    if (locationState.status === 'idle') {
+      handleUseCurrentLocation();
+    }
+  }, [locationState.status, handleUseCurrentLocation]);
+
+  useEffect(() => {
     let isMounted = true;
     async function loadRoute() {
+      const destinationLabel = destination.trim().length ? destination.trim() : 'Austin, TX';
+      const originLabel =
+        locationState.status === 'ready'
+          ? `${locationState.coords.latitude},${locationState.coords.longitude}`
+          : 'Midland, TX';
+
       try {
         setRouteLoading(true);
         setRouteError(null);
-        const data = await fetchRoute('Midland, TX', 'Austin, TX');
+        const data = await fetchRoute(originLabel, destinationLabel);
         if (isMounted) {
           setRouteState(data);
           setRouteError(null);
@@ -264,6 +261,7 @@ export default function RoutePlannerScreen() {
         console.error('Failed to load route', err);
         if (isMounted) {
           setRouteError('Failed to load route');
+          setRouteState(DEFAULT_ROUTE);
         }
       } finally {
         if (isMounted) {
@@ -276,14 +274,12 @@ export default function RoutePlannerScreen() {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [destination, originCoordinatesKey, locationState.status]);
 
   useEffect(() => {
     let isMounted = true;
     async function loadPlan() {
       try {
-        setPlanLoading(true);
-        setPlanError(null);
         const data = await fetchSelectedStops();
         if (isMounted) {
           setSelectedStops(data);
@@ -291,12 +287,7 @@ export default function RoutePlannerScreen() {
       } catch (err) {
         console.error('Failed to load selected stops', err);
         if (isMounted) {
-          setPlanError('Failed to load plan');
           setSelectedStops([]);
-        }
-      } finally {
-        if (isMounted) {
-          setPlanLoading(false);
         }
       }
     }
@@ -308,7 +299,7 @@ export default function RoutePlannerScreen() {
   }, []);
 
   const featuredSelection = selectedStops[0];
-  const featuredStop = featuredSelection?.station ?? stops[0] ?? null;
+  const featuredStop = featuredSelection?.station ?? bestAvailableStop ?? stops[0] ?? null;
   const featuredBrand = featuredStop ? getBrandStyle(featuredStop.brand) : null;
   const featuredPrice = featuredStop
     ? formatFuelPrice(featuredStop, fuelGrade, stationPrices)
@@ -321,358 +312,273 @@ export default function RoutePlannerScreen() {
         featuredStop.lastUpdatedMinutes
       )}`
     : null;
-  const originLabel = activeRoute?.origin?.label ?? 'Origin';
-  const destinationLabel = activeRoute?.destination?.label ?? 'Destination';
+
+  const turnByTurnSteps = useMemo(() => {
+    const steps: { title: string; meta?: string }[] = [];
+    const originLabel =
+      locationState.status === 'ready'
+        ? 'Current location'
+        : routeState?.origin?.label ?? DEFAULT_ROUTE.origin.label;
+    const destinationLabel =
+      destination.trim().length > 0
+        ? destination.trim()
+        : routeState?.destination?.label ?? DEFAULT_ROUTE.destination.label;
+
+    steps.push({ title: 'Depart', meta: originLabel });
+    if (bestAvailableStop) {
+      steps.push({
+        title: bestAvailableStop.name,
+        meta: bestStopMeta || bestAvailableStop.city,
+      });
+    }
+    steps.push({
+      title: 'Arrive',
+      meta: destinationLabel,
+    });
+    return steps;
+  }, [locationState.status, routeState, destination, bestAvailableStop, bestStopMeta]);
 
   return (
-    <SafeAreaView style={[styles.safeArea, { backgroundColor: pageBackground }]}> 
-      <ScrollView
-        style={{ backgroundColor: pageBackground }}
-        contentContainerStyle={styles.container}
-      >
-        <View
-          style={[styles.mapShell, styles.cardShadow, { backgroundColor: cardSurface, shadowColor: overlayShadow }]}
-        >
-          <RouteMap route={activeRoute} selectedStops={selectedStops} />
+    <SafeAreaView style={[styles.fullScreen, { backgroundColor: pageBackground }]}>
+      <View style={styles.mapWrapper}>
+        <RouteMap route={activeRoute} selectedStops={selectedStops} />
 
-          <View style={[styles.mapOverlay, { shadowColor: overlayShadow }]} pointerEvents="box-none">
-            <View style={[styles.searchCard, { backgroundColor: fieldBackground }]} pointerEvents="auto">
-              <View style={styles.fieldRow}>
-                <View style={styles.fieldRail}>
-                  <View style={[styles.fieldDot, { backgroundColor: accentColor }]} />
-                  <View>
-                    <ThemedText style={styles.fieldLabel}>Current Location</ThemedText>
-                    <ThemedText style={[styles.fieldValue, { color: primaryTextColor }]} numberOfLines={1}>
-                      {hasLocation
-                        ? `${locationState.coords.latitude.toFixed(2)}, ${locationState.coords.longitude.toFixed(2)}`
-                        : 'Use device GPS'}
-                    </ThemedText>
-                  </View>
-                </View>
-                <Pressable
-                  style={[styles.fieldButton, pendingLocation && styles.fieldButtonDisabled]}
-                  disabled={pendingLocation}
-                  onPress={handleUseCurrentLocation}
-                >
-                  {pendingLocation ? (
-                    <ActivityIndicator size="small" color="#ffffff" />
-                  ) : (
-                    <ThemedText style={styles.fieldButtonLabel}>Use</ThemedText>
-                  )}
-                </Pressable>
-              </View>
-
-              <View style={styles.fieldDivider} />
-
-              <View style={styles.fieldRow}>
-                <View style={styles.fieldRail}>
-                  <View style={[styles.fieldDot, styles.destinationDot]} />
-                  <View style={styles.destinationField}>
-                    <ThemedText style={styles.fieldLabel}>Destination</ThemedText>
-                    <TextInput
-                      placeholder="Enter city or address"
-                      placeholderTextColor={fieldMuted}
-                      value={destination}
-                      onChangeText={setDestination}
-                      style={[styles.destinationInput, { color: primaryTextColor }]}
-                      returnKeyType="done"
-                    />
-                  </View>
-                </View>
-              </View>
-              {locationError && (
-                <ThemedText style={styles.errorText}>{locationError}</ThemedText>
-              )}
-            </View>
-          </View>
-
-          {featuredStop && featuredBrand && (
-            <View style={styles.priceRailWrapper}>
-              <View
-                style={[
-                  styles.priceChip,
-                  { borderColor: featuredBrand.accent, backgroundColor: cardSurface },
-                ]}
-              >
-                <View style={[styles.brandBadge, { backgroundColor: featuredBrand.background }]}>
-                  <ThemedText style={styles.brandBadgeEmoji}>{featuredBrand.emoji}</ThemedText>
-                </View>
-                <View style={styles.priceChipDetails}>
-                  <ThemedText style={[styles.priceChipValue, { color: primaryTextColor }]}>
-                    {featuredPrice ?? '—'}
-                  </ThemedText>
-                  {featuredMeta && (
-                    <ThemedText style={[styles.priceChipMeta, { color: fieldMuted }]}>
-                      {featuredMeta}
-                    </ThemedText>
-                  )}
-                </View>
-              </View>
-            </View>
-          )}
-        </View>
-
-        <ThemedText style={[styles.priceStatusText, { color: fieldMuted }]}>
-          {priceStatusLabel} • {fuelGradeLabel[fuelGrade]}
-        </ThemedText>
-
-        <ThemedView style={[styles.planCard, styles.cardShadow, { backgroundColor: cardSurface }]}>
-          <View style={styles.planCardHeader}>
-            <View>
-              <ThemedText type="subtitle">
-                {originLabel} → {destinationLabel}
-              </ThemedText>
-              <ThemedText style={{ color: secondaryTextColor }}>{routeMetaLabel}</ThemedText>
-              {routeError && !routeLoading && (
-                <ThemedText style={styles.errorText}>{routeError}</ThemedText>
-              )}
-            </View>
-            <View style={styles.planBadge}>
-              <ThemedText style={styles.planBadgeLabel}>
-                {routeLoading ? 'Loading route' : 'Live Route'}
+        <View style={[styles.topControls, { backgroundColor: cardSurface }]}>
+          <View style={styles.inputRow}>
+            <View style={[styles.inputDot, { backgroundColor: accentColor }]} />
+            <View style={styles.inputCopy}>
+              <ThemedText style={[styles.inputLabel, { color: fieldMuted }]}>From</ThemedText>
+              <ThemedText style={[styles.inputValue, { color: primaryTextColor }]} numberOfLines={1}>
+                {hasLocation
+                  ? 'Current Location'
+                  : pendingLocation
+                    ? 'Detecting location…'
+                    : 'Use device GPS'}
               </ThemedText>
             </View>
-          </View>
-          <ThemedText style={[styles.planHelper, { color: secondaryTextColor }]}>
-            {selectedStops.length > 0
-              ? `You have ${selectedStops.length} planned fuel stop${selectedStops.length === 1 ? '' : 's'} on this route.`
-              : 'Choose stops from the Along Route tab to build your Tank Plan.'}
-          </ThemedText>
-
-          {selectedStops.length === 0 && (
-            <ThemedText style={{ color: secondaryTextColor }}>
-              No Tank Plan yet. Add stops from the Along Route tab.
-            </ThemedText>
-          )}
-
-          {selectedStops.slice(0, 3).map((selection, index) => {
-            const station = selection.station;
-            const brand = getBrandStyle(station?.brand);
-            const rawPrice = station?.price;
-            const price =
-              typeof rawPrice === 'number'
-                ? `$${rawPrice.toFixed(2)}`
-                : (rawPrice as string | undefined) || '—';
-            const cityLabel = station?.city ?? 'Unknown city';
-            const etaLabel =
-              typeof station?.etaMinutes === 'number' ? `ETA ${station.etaMinutes} min` : null;
-            const detourLabel =
-              typeof station?.distanceOffsetMiles === 'number'
-                ? `${station.distanceOffsetMiles} mi detour`
-                : null;
-            const metaLabel = [cityLabel, etaLabel, detourLabel].filter(Boolean).join(' • ') || 'Distance n/a';
-
-            return (
-              <View key={selection.id} style={styles.planStopRow}>
-                <View style={[styles.planStopIndex, { borderColor: brand.accent }]}>
-                  <ThemedText style={{ color: brand.accent }}>{index + 1}</ThemedText>
-                </View>
-                <View style={styles.planStopContent}>
-                  <View style={styles.planStopHeading}>
-                    <ThemedText type="defaultSemiBold" style={{ color: primaryTextColor }}>
-                      {station?.name ?? `Station ${selection.stopId}`}
-                    </ThemedText>
-                    <ThemedText style={[styles.planInlinePrice, { color: brand.accent }]}>{price}</ThemedText>
-                  </View>
-                  <ThemedText style={[styles.priceChipMeta, { color: fieldMuted }]}>{metaLabel}</ThemedText>
-                </View>
-              </View>
-            );
-          })}
-        </ThemedView>
-
-        <ThemedView style={[styles.planListCard, styles.cardShadow, { backgroundColor: cardSurface }]}>
-          <View style={styles.planListHeader}>
-            <ThemedText type="subtitle">Tank Plan</ThemedText>
             <Pressable
-              onPress={confirmClearPlan}
-              disabled={!selectedStops.length || clearingPlan}
-              style={[
-                styles.clearPlanButton,
-                (!selectedStops.length || clearingPlan) && styles.clearPlanButtonDisabled,
-              ]}
+              style={[styles.inlineButton, pendingLocation && styles.inlineButtonDisabled]}
+              disabled={pendingLocation}
+              onPress={handleUseCurrentLocation}
             >
-              {clearingPlan ? (
+              {pendingLocation ? (
                 <ActivityIndicator size="small" color="#ffffff" />
               ) : (
-                <ThemedText style={styles.clearPlanButtonLabel}>Clear Plan</ThemedText>
+                <ThemedText style={styles.inlineButtonLabel}>Refresh</ThemedText>
               )}
             </Pressable>
           </View>
-          {planLoading && (
-            <ThemedText style={{ color: secondaryTextColor }}>Loading plan…</ThemedText>
+          <View style={styles.inputDivider} />
+          <View style={styles.inputRow}>
+            <View style={[styles.inputDot, styles.inputDotDestination]} />
+            <View style={styles.inputCopy}>
+              <ThemedText style={[styles.inputLabel, { color: fieldMuted }]}>To</ThemedText>
+              <TextInput
+                placeholder="Where to?"
+                placeholderTextColor={fieldMuted}
+                value={destination}
+                onChangeText={setDestination}
+                style={[styles.destinationInput, { color: primaryTextColor }]}
+                returnKeyType="done"
+              />
+            </View>
+          </View>
+          {locationError && (
+            <ThemedText style={[styles.errorText, { marginTop: 8 }]}>{locationError}</ThemedText>
           )}
-          {planError && !planLoading && (
-            <ThemedText style={[styles.errorText, { marginTop: 4 }]}>{planError}</ThemedText>
-          )}
-          {!planLoading && !planError && selectedStops.length === 0 && (
-            <ThemedText style={{ color: secondaryTextColor }}>
-              No stops in your plan yet. Add stops from the Along Route tab.
+        </View>
+
+        {bestAvailableStop && (
+          <Pressable style={[styles.recommendationPill, { backgroundColor: cardSurface }]}>
+            <ThemedText style={[styles.recommendationLabel, { color: fieldMuted }]}>
+              Recommended stop
             </ThemedText>
-          )}
-          {!planLoading &&
-            !planError &&
-            selectedStops.map((selection, index) => {
-              const station = selection.station;
-              const brand = getBrandStyle(station?.brand);
-              const rawPrice = station?.price;
-              const price =
-                typeof rawPrice === 'number'
-                  ? `$${(rawPrice as number).toFixed(2)}`
-                  : (rawPrice as string | undefined) || '—';
+            <ThemedText style={[styles.recommendationName, { color: primaryTextColor }]} numberOfLines={1}>
+              {bestAvailableStop.name}
+            </ThemedText>
+            <ThemedText style={[styles.recommendationMeta, { color: fieldMuted }]} numberOfLines={1}>
+              {bestStopMeta || bestAvailableStop.city}
+            </ThemedText>
+          </Pressable>
+        )}
 
-              return (
-                <View key={selection.id} style={[styles.planStopRow, styles.planListRow]}>
-                  <View style={[styles.planStopIndex, { borderColor: brand.accent }]}>
-                    <ThemedText style={{ color: brand.accent }}>{index + 1}</ThemedText>
-                  </View>
-                  <View style={styles.planStopContent}>
-                    <View style={styles.planStopHeading}>
-                      <ThemedText type="defaultSemiBold" style={{ color: primaryTextColor }}>
-                        {station?.name ?? `Station ${selection.stopId}`}
-                      </ThemedText>
-                      <View style={styles.planStopActions}>
-                        <ThemedText style={[styles.planListPrice, { color: brand.accent }]}>
-                          {price}
-                        </ThemedText>
-                        <Pressable
-                          onPress={() => handleRemoveStop(selection)}
-                          disabled={removingId === selection.id || clearingPlan}
-                          style={[
-                            styles.planRemoveButton,
-                            (removingId === selection.id || clearingPlan) &&
-                              styles.planRemoveButtonDisabled,
-                          ]}
-                        >
-                          {removingId === selection.id ? (
-                            <ActivityIndicator size="small" color="#f87171" />
-                          ) : (
-                            <Ionicons name="trash-outline" size={16} color="#f87171" />
-                          )}
-                        </Pressable>
-                      </View>
-                    </View>
-                    <ThemedText style={[styles.planListMeta, { color: fieldMuted }]}>
-                      {station?.city ?? 'Unknown city'} •{' '}
-                      {station?.etaMinutes ? `ETA ${station.etaMinutes} min • ` : ''}
-                      {station?.distanceMiles ? formatDistance(station.distanceMiles) : 'Distance n/a'}
-                    </ThemedText>
-                    <View style={styles.planAddedBadge}>
-                      <ThemedText style={styles.planAddedBadgeLabel}>Added stop</ThemedText>
-                    </View>
-                  </View>
-                </View>
-              );
-            })}
-        </ThemedView>
+        {featuredStop && featuredBrand && (
+          <View style={styles.priceRailWrapper}>
+            <View
+              style={[
+                styles.priceChip,
+                { borderColor: featuredBrand.accent, backgroundColor: cardSurface },
+              ]}
+            >
+              <View style={[styles.brandBadge, { backgroundColor: featuredBrand.background }]}>
+                <ThemedText style={styles.brandBadgeEmoji}>{featuredBrand.emoji}</ThemedText>
+              </View>
+              <View style={styles.priceChipDetails}>
+                <ThemedText style={[styles.priceChipValue, { color: primaryTextColor }]}>
+                  {featuredPrice ?? '—'}
+                </ThemedText>
+                {featuredMeta && (
+                  <ThemedText style={[styles.priceChipMeta, { color: fieldMuted }]}>
+                    {featuredMeta}
+                  </ThemedText>
+                )}
+              </View>
+            </View>
+          </View>
+        )}
+      </View>
 
+      <ThemedView style={[styles.directionsSheet, { backgroundColor: cardSurface }]}>
+        <View style={styles.directionsHeader}>
+          <View>
+            <ThemedText type="subtitle">Turn-by-turn</ThemedText>
+            <ThemedText style={{ color: secondaryTextColor }}>{routeMetaLabel}</ThemedText>
+          </View>
+          <ThemedText style={{ color: fieldMuted }}>{priceStatusLabel}</ThemedText>
+        </View>
+        <ScrollView
+          style={styles.stepList}
+          contentContainerStyle={{ gap: 12, paddingBottom: 12 }}
+          showsVerticalScrollIndicator={false}
+        >
+          {turnByTurnSteps.map((step, index) => (
+            <View key={`${step.title}-${index}`} style={styles.stepRow}>
+              <View style={[styles.stepIndex, { borderColor: accentColor }]}>
+                <ThemedText style={{ color: accentColor }}>{index + 1}</ThemedText>
+              </View>
+              <View style={styles.stepCopy}>
+                <ThemedText style={[styles.stepTitle, { color: primaryTextColor }]}>
+                  {step.title}
+                </ThemedText>
+                {step.meta && (
+                  <ThemedText style={[styles.stepMeta, { color: fieldMuted }]} numberOfLines={2}>
+                    {step.meta}
+                  </ThemedText>
+                )}
+              </View>
+            </View>
+          ))}
+        </ScrollView>
         <Pressable
-          style={[styles.primaryButton, styles.cardShadow, !canStartRoute && styles.primaryButtonDisabled]}
-          disabled={!canStartRoute}
+          style={[
+            styles.primaryButton,
+            (!canStartRoute || routeLoading) && styles.primaryButtonDisabled,
+          ]}
+          disabled={!canStartRoute || routeLoading}
           onPress={handleStartRoute}
         >
-          <ThemedText style={styles.primaryButtonLabel}>Start Route</ThemedText>
+          <ThemedText style={styles.primaryButtonLabel}>
+            {routeLoading ? 'Loading route…' : 'Start driving'}
+          </ThemedText>
         </Pressable>
-      </ScrollView>
+      </ThemedView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
+  fullScreen: {
     flex: 1,
   },
-  container: {
-    flexGrow: 1,
-    paddingTop: 24,
-    paddingBottom: 48,
-    paddingHorizontal: 20,
-    gap: 24,
-  },
-  cardShadow: {
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 3,
-  },
-  mapShell: {
-    height: 460,
-    borderRadius: 24,
+  mapWrapper: {
+    flex: 1,
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 20,
     overflow: 'hidden',
   },
-  mapOverlay: {
+  topControls: {
     position: 'absolute',
-    top: 20,
-    left: 20,
-    right: 20,
+    top: 16,
+    left: 16,
+    right: 16,
+    borderRadius: 16,
+    padding: 14,
+    gap: 12,
     shadowOpacity: 0.08,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 8 },
-    elevation: 3,
-  },
-  searchCard: {
-    borderRadius: 16,
-    padding: 18,
-    gap: 16,
+    elevation: 4,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(26,26,26,0.08)',
   },
-  fieldRow: {
+  inputRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 16,
+    gap: 12,
   },
-  fieldRail: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    flex: 1,
-  },
-  fieldDot: {
+  inputDot: {
     width: 12,
     height: 12,
     borderRadius: 6,
-  },
-  destinationDot: {
-    backgroundColor: '#f43f5e',
-  },
-  fieldLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-    color: '#9AA0A6',
-  },
-  fieldValue: {
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  fieldDivider: {
-    height: 1,
-    backgroundColor: '#E4E7EC',
-  },
-  fieldButton: {
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    borderRadius: 18,
     backgroundColor: '#3B82F6',
   },
-  fieldButtonDisabled: {
-    opacity: 0.7,
+  inputDotDestination: {
+    backgroundColor: '#f43f5e',
   },
-  fieldButtonLabel: {
-    color: '#ffffff',
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  destinationField: {
+  inputCopy: {
     flex: 1,
+  },
+  inputLabel: {
+    fontSize: 13,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    fontWeight: '600',
+  },
+  inputValue: {
+    fontSize: 18,
+    fontWeight: '700',
   },
   destinationInput: {
     fontSize: 18,
-    fontWeight: '600',
+    fontWeight: '700',
     padding: 0,
+  },
+  inlineButton: {
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    backgroundColor: '#3B82F6',
+  },
+  inlineButtonDisabled: {
+    opacity: 0.6,
+  },
+  inlineButtonLabel: {
+    color: '#ffffff',
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  inputDivider: {
+    height: 1,
+    backgroundColor: 'rgba(148, 163, 184, 0.4)',
+  },
+  recommendationPill: {
+    position: 'absolute',
+    top: 120,
+    right: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 14,
+    gap: 2,
+    maxWidth: '60%',
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 4,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(26,26,26,0.08)',
+  },
+  recommendationLabel: {
+    fontSize: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    fontWeight: '700',
+  },
+  recommendationName: {
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  recommendationMeta: {
+    fontSize: 13,
   },
   priceRailWrapper: {
     position: 'absolute',
@@ -680,178 +586,82 @@ const styles = StyleSheet.create({
     left: 16,
     right: 16,
   },
-  priceRail: {
-    paddingLeft: 16,
-    paddingRight: 32,
-    gap: 12,
-  },
   priceChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
-    borderRadius: 16,
+    padding: 14,
+    borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth,
-    gap: 12,
+    gap: 10,
     marginRight: 12,
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 3,
   },
   brandBadge: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
   },
   brandBadgeEmoji: {
-    fontSize: 20,
+    fontSize: 18,
   },
   priceChipDetails: {
     gap: 2,
   },
   priceChipValue: {
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: '700',
   },
   priceChipMeta: {
-    fontSize: 14,
+    fontSize: 13,
   },
-  priceMarker: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 16,
-    borderWidth: 1,
-  },
-  priceMarkerValue: {
-    fontWeight: '700',
-  },
-  priceMarkerMeta: {
-    fontSize: 12,
-  },
-  priceStatusText: {
-    textAlign: 'center',
-    fontSize: 14,
-    lineHeight: 20,
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-  },
-  planCard: {
-    padding: 20,
-    borderRadius: 16,
-    gap: 16,
-  },
-  planCardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  planBadge: {
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    backgroundColor: '#E8F1FF',
-  },
-  planBadgeLabel: {
-    color: '#3B82F6',
-    fontWeight: '700',
-    fontSize: 12,
-    textTransform: 'uppercase',
-  },
-  planHelper: {
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  planStopRow: {
-    flexDirection: 'row',
-    gap: 16,
-    alignItems: 'center',
-  },
-  planStopIndex: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-  },
-  planStopContent: {
-    flex: 1,
-    gap: 6,
-  },
-  planStopHeading: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+  directionsSheet: {
+    padding: 16,
     gap: 12,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(26,26,26,0.08)',
   },
-  planInlinePrice: {
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  planListCard: {
-    padding: 20,
-    borderRadius: 16,
-    gap: 16,
-  },
-  planListHeader: {
+  directionsHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    gap: 12,
+    justifyContent: 'space-between',
   },
-  planListRow: {
+  stepList: {
+    maxHeight: 240,
+  },
+  stepRow: {
+    flexDirection: 'row',
+    gap: 12,
     alignItems: 'flex-start',
   },
-  planListPrice: {
-    fontWeight: '700',
+  stepIndex: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepCopy: {
+    flex: 1,
+    gap: 2,
+  },
+  stepTitle: {
     fontSize: 16,
+    fontWeight: '700',
   },
-  planListMeta: {
-    fontSize: 14,
-  },
-  planAddedBadge: {
-    marginTop: 6,
-    alignSelf: 'flex-start',
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    backgroundColor: '#E8F1FF',
-  },
-  planAddedBadgeLabel: {
-    color: '#3B82F6',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  planStopActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  planRemoveButton: {
-    padding: 8,
-    borderRadius: 999,
-    backgroundColor: '#FEE2E2',
-  },
-  planRemoveButtonDisabled: {
-    opacity: 0.5,
-  },
-  clearPlanButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderRadius: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    backgroundColor: '#3B82F6',
-  },
-  clearPlanButtonDisabled: {
-    opacity: 0.5,
-  },
-  clearPlanButtonLabel: {
-    color: '#ffffff',
-    fontWeight: '600',
+  stepMeta: {
     fontSize: 14,
   },
   primaryButton: {
-    borderRadius: 16,
-    paddingVertical: 16,
+    borderRadius: 14,
+    paddingVertical: 14,
     alignItems: 'center',
     backgroundColor: '#3B82F6',
   },
@@ -861,7 +671,7 @@ const styles = StyleSheet.create({
   primaryButtonLabel: {
     color: '#ffffff',
     fontWeight: '700',
-    fontSize: 17,
+    fontSize: 16,
   },
   errorText: {
     color: '#f87171',
