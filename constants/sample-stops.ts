@@ -14,6 +14,8 @@ export type SampleStop = {
   city: string;
   price: string | number;
   fuelBreakdown?: FuelBreakdown;
+  priceSource?: string;
+  priceFetchedAt?: string;
   etaMinutes: number;
   distanceOffsetMiles: number;
   distanceMiles?: number;
@@ -27,7 +29,8 @@ export type SampleStop = {
 
 export type SampleRouteEndpoint = {
   label: string;
-  coords: Coordinates;
+  coords?: Coordinates;
+  coordinates?: Coordinates;
 };
 
 export type SampleRoute = {
@@ -44,6 +47,14 @@ export type SampleRoute = {
   path?: Coordinates[];
   distanceText?: string;
   durationText?: string;
+  steps?: RouteStep[];
+  bestStopId?: string;
+};
+
+export type RouteStep = {
+  instruction: string;
+  distanceText?: string | null;
+  durationText?: string | null;
 };
 
 export const MIDLAND_TO_AUSTIN_STOPS: SampleStop[] = [

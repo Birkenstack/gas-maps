@@ -42,11 +42,13 @@ const fuelGradeLabel = {
 
 export default function RoutePlannerScreen() {
   const [destination, setDestination] = useState<string>('');
+  const [debouncedDestination, setDebouncedDestination] = useState<string>('');
   const [locationState, setLocationState] = useState<LocationState>({ status: 'idle' });
   const [selectedStops, setSelectedStops] = useState<SelectedStopRecord[]>([]);
   const [routeState, setRouteState] = useState<RouteResponse | null>(null);
   const [routeLoading, setRouteLoading] = useState(true);
   const [routeError, setRouteError] = useState<string | null>(null);
+  const [showAllSteps, setShowAllSteps] = useState(false);
   const { showTraffic, showOnlyOpenStations, fuelGrade } = usePreferences();
   const activeRoute = routeState ?? DEFAULT_ROUTE;
   const fuelPriceState = useFuelPrices(activeRoute?.stops ?? []);
@@ -164,6 +166,14 @@ export default function RoutePlannerScreen() {
 
   const bestAvailableStop = useMemo(() => {
     if (!stops.length) return null;
+
+    const backendBest = stops.find(
+      (stop) => stop.id && routeState?.bestStopId && String(stop.id) === String(routeState.bestStopId)
+    );
+    if (backendBest) {
+      return backendBest;
+    }
+
     const priceValue = (stop: SampleRoute['stops'][number]) => {
       const breakdown = stop.fuelBreakdown?.[fuelGrade];
       if (typeof breakdown === 'number') return breakdown;
@@ -185,7 +195,7 @@ export default function RoutePlannerScreen() {
     });
 
     return sorted[0] ?? null;
-  }, [stops, fuelGrade]);
+  }, [stops, fuelGrade, routeState?.bestStopId]);
   const stationPrices = fuelPriceState.data;
   const bestStopPrice = bestAvailableStop
     ? formatFuelPrice(bestAvailableStop, fuelGrade, stationPrices)
@@ -202,11 +212,7 @@ export default function RoutePlannerScreen() {
     .filter(Boolean)
     .join(' • ');
   const priceStatusLabel =
-    fuelPriceState.status === 'ready'
-      ? 'Live prices synced'
-      : fuelPriceState.status === 'loading'
-        ? 'Fetching live prices…'
-        : 'Using local sample prices';
+    fuelPriceState.status === 'ready' ? 'Live prices synced' : null;
 
   const summaryRoute = activeRoute;
   const derivedDurationMinutes = summaryRoute?.durationMinutes ?? null;
@@ -241,9 +247,16 @@ export default function RoutePlannerScreen() {
   }, [locationState.status, handleUseCurrentLocation]);
 
   useEffect(() => {
+    const handle = setTimeout(() => {
+      setDebouncedDestination(destination.trim());
+    }, 500);
+    return () => clearTimeout(handle);
+  }, [destination]);
+
+  useEffect(() => {
     let isMounted = true;
     async function loadRoute() {
-      const destinationLabel = destination.trim().length ? destination.trim() : 'Austin, TX';
+      const destinationLabel = debouncedDestination.length ? debouncedDestination : 'Austin, TX';
       const originLabel =
         locationState.status === 'ready'
           ? `${locationState.coords.latitude},${locationState.coords.longitude}`
@@ -274,7 +287,7 @@ export default function RoutePlannerScreen() {
     return () => {
       isMounted = false;
     };
-  }, [destination, originCoordinatesKey, locationState.status]);
+  }, [debouncedDestination, originCoordinatesKey, locationState.status]);
 
   useEffect(() => {
     let isMounted = true;
@@ -298,6 +311,21 @@ export default function RoutePlannerScreen() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!bestAvailableStop) return;
+    if (selectedStops.length > 0) return;
+
+    setSelectedStops([
+      {
+        id: -1,
+        stopId: String(bestAvailableStop.id),
+        routeId: activeRoute?.id ?? 'midland-to-austin',
+        recordedAt: new Date().toISOString(),
+        station: bestAvailableStop,
+      },
+    ]);
+  }, [selectedStops.length, bestAvailableStop, activeRoute?.id]);
+
   const featuredSelection = selectedStops[0];
   const featuredStop = featuredSelection?.station ?? bestAvailableStop ?? stops[0] ?? null;
   const featuredBrand = featuredStop ? getBrandStyle(featuredStop.brand) : null;
@@ -314,15 +342,23 @@ export default function RoutePlannerScreen() {
     : null;
 
   const turnByTurnSteps = useMemo(() => {
+    const liveSteps = activeRoute?.steps;
+    if (liveSteps && liveSteps.length > 0) {
+      return liveSteps.map((step, index) => ({
+        title: step.instruction ?? `Step ${index + 1}`,
+        meta: step.distanceText ?? step.durationText ?? undefined,
+      }));
+    }
+
     const steps: { title: string; meta?: string }[] = [];
     const originLabel =
       locationState.status === 'ready'
         ? 'Current location'
-        : routeState?.origin?.label ?? DEFAULT_ROUTE.origin.label;
+        : activeRoute?.origin?.label ?? DEFAULT_ROUTE.origin.label;
     const destinationLabel =
       destination.trim().length > 0
         ? destination.trim()
-        : routeState?.destination?.label ?? DEFAULT_ROUTE.destination.label;
+        : activeRoute?.destination?.label ?? DEFAULT_ROUTE.destination.label;
 
     steps.push({ title: 'Depart', meta: originLabel });
     if (bestAvailableStop) {
@@ -336,7 +372,14 @@ export default function RoutePlannerScreen() {
       meta: destinationLabel,
     });
     return steps;
-  }, [locationState.status, routeState, destination, bestAvailableStop, bestStopMeta]);
+  }, [locationState.status, destination, bestAvailableStop, bestStopMeta, activeRoute]);
+
+  const visibleSteps = useMemo(() => {
+    if (showAllSteps || turnByTurnSteps.length <= 1) {
+      return turnByTurnSteps;
+    }
+    return turnByTurnSteps.slice(0, 1);
+  }, [showAllSteps, turnByTurnSteps]);
 
   return (
     <SafeAreaView style={[styles.fullScreen, { backgroundColor: pageBackground }]}>
@@ -347,13 +390,13 @@ export default function RoutePlannerScreen() {
           <View style={styles.inputRow}>
             <View style={[styles.inputDot, { backgroundColor: accentColor }]} />
             <View style={styles.inputCopy}>
-              <ThemedText style={[styles.inputLabel, { color: fieldMuted }]}>From</ThemedText>
+              <ThemedText style={[styles.inputLabel, { color: fieldMuted }]}>Origin</ThemedText>
               <ThemedText style={[styles.inputValue, { color: primaryTextColor }]} numberOfLines={1}>
                 {hasLocation
-                  ? 'Current Location'
+                  ? 'Using current location'
                   : pendingLocation
                     ? 'Detecting location…'
-                    : 'Use device GPS'}
+                    : 'Location unavailable'}
               </ThemedText>
             </View>
             <Pressable
@@ -372,7 +415,7 @@ export default function RoutePlannerScreen() {
           <View style={styles.inputRow}>
             <View style={[styles.inputDot, styles.inputDotDestination]} />
             <View style={styles.inputCopy}>
-              <ThemedText style={[styles.inputLabel, { color: fieldMuted }]}>To</ThemedText>
+              <ThemedText style={[styles.inputLabel, { color: fieldMuted }]}>Destination</ThemedText>
               <TextInput
                 placeholder="Where to?"
                 placeholderTextColor={fieldMuted}
@@ -434,17 +477,21 @@ export default function RoutePlannerScreen() {
             <ThemedText type="subtitle">Turn-by-turn</ThemedText>
             <ThemedText style={{ color: secondaryTextColor }}>{routeMetaLabel}</ThemedText>
           </View>
-          <ThemedText style={{ color: fieldMuted }}>{priceStatusLabel}</ThemedText>
+          {priceStatusLabel && (
+            <ThemedText style={{ color: fieldMuted }}>{priceStatusLabel}</ThemedText>
+          )}
         </View>
         <ScrollView
           style={styles.stepList}
           contentContainerStyle={{ gap: 12, paddingBottom: 12 }}
           showsVerticalScrollIndicator={false}
         >
-          {turnByTurnSteps.map((step, index) => (
+          {visibleSteps.map((step, index) => (
             <View key={`${step.title}-${index}`} style={styles.stepRow}>
               <View style={[styles.stepIndex, { borderColor: accentColor }]}>
-                <ThemedText style={{ color: accentColor }}>{index + 1}</ThemedText>
+                <ThemedText style={{ color: accentColor }}>
+                  {showAllSteps ? index + 1 : 'Next'}
+                </ThemedText>
               </View>
               <View style={styles.stepCopy}>
                 <ThemedText style={[styles.stepTitle, { color: primaryTextColor }]}>
@@ -458,6 +505,13 @@ export default function RoutePlannerScreen() {
               </View>
             </View>
           ))}
+          {turnByTurnSteps.length > 1 && (
+            <Pressable onPress={() => setShowAllSteps((prev) => !prev)} style={styles.expandButton}>
+              <ThemedText style={{ color: accentColor, fontWeight: '700' }}>
+                {showAllSteps ? 'Hide full route' : `Show all steps (${turnByTurnSteps.length})`}
+              </ThemedText>
+            </Pressable>
+          )}
         </ScrollView>
         <Pressable
           style={[
@@ -658,6 +712,10 @@ const styles = StyleSheet.create({
   },
   stepMeta: {
     fontSize: 14,
+  },
+  expandButton: {
+    paddingVertical: 8,
+    alignItems: 'center',
   },
   primaryButton: {
     borderRadius: 14,

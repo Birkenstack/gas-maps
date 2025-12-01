@@ -15,8 +15,8 @@ import {
   addStopToPlan,
   fetchRoute,
   fetchSelectedStops,
-  fetchStopsForRoute,
   removeStopFromPlan,
+  type RouteResponse,
   type SelectedStopRecord,
 } from '@/services/stopService';
 import { formatDistance, formatFuelPrice, formatUpdatedLabel } from '@/utils/stations';
@@ -84,7 +84,7 @@ const priceValue = (stop: SampleStop, grade: FuelGrade) => {
 };
 
 export default function ExploreScreen() {
-  const [route, setRoute] = useState(MIDLAND_TO_AUSTIN_ROUTE);
+  const [route, setRoute] = useState<RouteResponse>(MIDLAND_TO_AUSTIN_ROUTE);
   const [sortKey, setSortKey] = useState<SortKey>('distance');
   const [filter, setFilter] = useState<FilterId>('all');
 
@@ -110,14 +110,13 @@ export default function ExploreScreen() {
       try {
         setLoading(true);
 
-        const [routeData, stopsData, selectionData] = await Promise.all([
+        const [routeData, selectionData] = await Promise.all([
           fetchRoute('Midland, TX', 'Austin, TX'),
-          fetchStopsForRoute('Midland, TX', 'Austin, TX'),
           fetchSelectedStops(),
         ]);
 
         setRoute(routeData);
-        setStops(stopsData);
+        setStops(Array.isArray(routeData?.stops) ? routeData.stops : MIDLAND_TO_AUSTIN_ROUTE.stops);
         setSelectedStops(
           selectionData.reduce<Record<string, SelectedStopRecord>>((acc, record) => {
             const key = String(record.stopId ?? record.station?.id ?? '');
@@ -193,7 +192,11 @@ export default function ExploreScreen() {
       const existing = selectedStops[stopKey];
 
       if (existing) {
-        await removeStopFromPlan(existing.id);
+        try {
+          await removeStopFromPlan(existing.id);
+        } catch (err) {
+          console.warn('Failed to remove stop from backend, falling back to local state', err);
+        }
         setSelectedStops((prev) => {
           const next = { ...prev };
           delete next[stopKey];
@@ -202,8 +205,22 @@ export default function ExploreScreen() {
         return;
       }
 
-      const result = await addStopToPlan(stopKey, routeId);
-      setSelectedStops((prev) => ({ ...prev, [stopKey]: result }));
+      try {
+        const result = await addStopToPlan(stopKey, routeId);
+        setSelectedStops((prev) => ({ ...prev, [stopKey]: result }));
+      } catch (err) {
+        console.warn('Failed to add stop to backend, falling back to local state', err);
+        setSelectedStops((prev) => ({
+          ...prev,
+          [stopKey]: {
+            id: -1,
+            stopId: stopKey,
+            routeId,
+            recordedAt: new Date().toISOString(),
+            station: stop,
+          },
+        }));
+      }
     } catch (err) {
       console.error('Failed to toggle stop', err);
     }
@@ -213,9 +230,7 @@ export default function ExploreScreen() {
   const priceStatusLabel =
     fuelPriceState.status === 'ready'
       ? 'Live prices'
-      : fuelPriceState.status === 'loading'
-        ? 'Refreshing live prices…'
-        : 'Offline price cache';
+      : 'Offline price cache';
 
   return (
     <ScrollView style={{ backgroundColor: theme.background }} contentContainerStyle={styles.container}>
@@ -267,10 +282,6 @@ export default function ExploreScreen() {
           <Ionicons name="swap-vertical" size={18} color={theme.accent} />
           <ThemedText style={[styles.sortLabel, { color: theme.primaryText }]}>Sort by {activeSort.label}</ThemedText>
           <Ionicons name="chevron-down" size={18} color={theme.accent} />
-        </Pressable>
-        <Pressable style={[styles.viewButton, { backgroundColor: helperSurface }]}>
-          <Ionicons name="map-outline" size={18} color={theme.accent} />
-          <ThemedText style={[styles.viewButtonLabel, { color: theme.primaryText }]}>Map</ThemedText>
         </Pressable>
       </View>
       <ThemedText style={[styles.priceStatusText, { color: theme.secondaryText }]}>

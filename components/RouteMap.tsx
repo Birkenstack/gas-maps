@@ -1,4 +1,4 @@
-import { memo, useMemo } from 'react';
+import { memo, useEffect, useMemo, useRef } from 'react';
 import { StyleSheet, View } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 
@@ -84,6 +84,7 @@ const defaultRegion = {
 };
 
 const RouteMap = ({ route, selectedStops }: RouteMapProps) => {
+  const mapRef = useRef<MapView | null>(null);
   const colorScheme = useColorScheme();
   const { showTraffic, showOnlyOpenStations } = usePreferences();
   const accentColor = useThemeColor({ light: '#2b61ff', dark: '#7aa2ff' }, 'tint');
@@ -98,8 +99,12 @@ const RouteMap = ({ route, selectedStops }: RouteMapProps) => {
     typeof point.longitude === 'number' &&
     Number.isFinite(point.longitude);
 
-  const originCoordinate: LatLng | null = (route?.origin?.coordinates as LatLng) ?? null;
-  const destinationCoordinate: LatLng | null = (route?.destination?.coordinates as LatLng) ?? null;
+  const originCoordinate: LatLng | null =
+    (route?.origin?.coordinates as LatLng) ?? (route?.origin?.coords as LatLng) ?? null;
+  const destinationCoordinate: LatLng | null =
+    (route?.destination?.coordinates as LatLng) ??
+    (route?.destination?.coords as LatLng) ??
+    null;
 
   const hasOrigin = validCoordinate(originCoordinate);
   const hasDestination = validCoordinate(destinationCoordinate);
@@ -144,6 +149,23 @@ const RouteMap = ({ route, selectedStops }: RouteMapProps) => {
       .filter((station) => validCoordinate(station.coordinates));
   }, [selectedStops]);
 
+  useEffect(() => {
+    const coordinates: LatLng[] = [];
+    if (hasOrigin && originCoordinate) coordinates.push(originCoordinate);
+    stops.forEach((stop) => coordinates.push(stop.coordinates));
+    selectedMarkers.forEach((station) => coordinates.push(station.coordinates));
+    if (hasDestination && destinationCoordinate) coordinates.push(destinationCoordinate);
+
+    if (coordinates.length === 0) return;
+    const padding = { top: 60, right: 60, bottom: 120, left: 60 };
+    requestAnimationFrame(() => {
+      mapRef.current?.fitToCoordinates(coordinates, {
+        edgePadding: padding,
+        animated: true,
+      });
+    });
+  }, [hasOrigin, hasDestination, originCoordinate, destinationCoordinate, stops, selectedMarkers]);
+
   if (!route) {
     return <View style={styles.wrapper} />;
   }
@@ -151,6 +173,7 @@ const RouteMap = ({ route, selectedStops }: RouteMapProps) => {
   return (
     <View style={styles.wrapper}>
       <MapView
+        ref={mapRef}
         style={styles.map}
         provider={PROVIDER_GOOGLE}
         initialRegion={mapRegion}
@@ -163,6 +186,7 @@ const RouteMap = ({ route, selectedStops }: RouteMapProps) => {
         showsTraffic={showTraffic}
         showsUserLocation
         showsMyLocationButton
+        showsScale
       >
         {Array.isArray(route.polyline) && route.polyline.length > 0 && (
           <Polyline

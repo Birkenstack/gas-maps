@@ -47,3 +47,10 @@ app-example
 
 # coverage and test reports (optional)
 coverage/
+
+# Python cache
+__pycache__/
+**/__pycache__/
+
+# Flask instance folder
+backend/instance/
