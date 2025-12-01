@@ -145,14 +145,24 @@ export default function ExploreScreen() {
     [showOnlyOpenStations, stops]
   );
 
+  const onRouteStops = useMemo(() => {
+    const withinDetour = preferenceStops.filter(
+      (stop) =>
+        typeof stop.distanceOffsetMiles === 'number' &&
+        stop.distanceOffsetMiles <= 2 &&
+        typeof stop.distanceMiles === 'number'
+    );
+    return withinDetour.length > 0 ? withinDetour : preferenceStops;
+  }, [preferenceStops]);
+
   const filteredStops = useMemo(() => {
-    return preferenceStops.filter((stop) => {
+    return onRouteStops.filter((stop) => {
       if (filter === 'open') return stop.isOpen;
       if (filter === 'rewards') return stop.amenities?.includes('Rewards eligible');
       if (filter === 'detour') return (stop.distanceOffsetMiles ?? 0) <= 0.5;
       return true;
     });
-  }, [filter, preferenceStops]);
+  }, [filter, onRouteStops]);
 
   const sortedStops = useMemo(() => {
     const next = [...filteredStops];
@@ -471,6 +481,7 @@ const styles = StyleSheet.create({
   heroMapContent: {
     borderRadius: 16,
     overflow: 'hidden',
+    height: 220,
   },
   toolbar: {
     flexDirection: 'row',
@@ -623,10 +634,11 @@ const styles = StyleSheet.create({
   },
   stopFooter: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
     gap: 12,
     marginTop: 12,
+    flexWrap: 'wrap',
   },
   footerLabel: {
     fontWeight: '600',
@@ -639,6 +651,8 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     paddingHorizontal: 20,
     paddingVertical: 12,
+    alignSelf: 'flex-start',
+    marginLeft: 'auto',
   },
   stopButtonSelected: {
     opacity: 0.9,

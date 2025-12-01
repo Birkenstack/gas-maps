@@ -14,6 +14,9 @@ type LatLng = { latitude: number; longitude: number };
 type RouteMapProps = {
   route: SampleRoute | null;
   selectedStops?: SelectedStopRecord[];
+  userLocation?: LatLng | null;
+  driving?: boolean;
+  focusCoordinate?: LatLng | null;
 };
 
 const lightMapStyle = [
@@ -83,7 +86,7 @@ const defaultRegion = {
   longitudeDelta: 6.5,
 };
 
-const RouteMap = ({ route, selectedStops }: RouteMapProps) => {
+const RouteMap = ({ route, selectedStops, userLocation, driving, focusCoordinate }: RouteMapProps) => {
   const mapRef = useRef<MapView | null>(null);
   const colorScheme = useColorScheme();
   const { showTraffic, showOnlyOpenStations } = usePreferences();
@@ -99,6 +102,14 @@ const RouteMap = ({ route, selectedStops }: RouteMapProps) => {
     typeof point.longitude === 'number' &&
     Number.isFinite(point.longitude);
 
+  const polylinePoints = useMemo(
+    () =>
+      Array.isArray(route?.polyline)
+        ? route.polyline.filter((point): point is LatLng => validCoordinate(point))
+        : [],
+    [route?.polyline]
+  );
+
   const originCoordinate: LatLng | null =
     (route?.origin?.coordinates as LatLng) ?? (route?.origin?.coords as LatLng) ?? null;
   const destinationCoordinate: LatLng | null =
@@ -108,6 +119,8 @@ const RouteMap = ({ route, selectedStops }: RouteMapProps) => {
 
   const hasOrigin = validCoordinate(originCoordinate);
   const hasDestination = validCoordinate(destinationCoordinate);
+
+  const userPoint = validCoordinate(userLocation) ? userLocation : null;
 
   const mapRegion = useMemo(() => {
     if (hasOrigin && hasDestination && originCoordinate && destinationCoordinate) {
@@ -129,8 +142,16 @@ const RouteMap = ({ route, selectedStops }: RouteMapProps) => {
         longitudeDelta: defaultRegion.longitudeDelta / 2,
       };
     }
+    if (userPoint) {
+      return {
+        latitude: userPoint.latitude,
+        longitude: userPoint.longitude,
+        latitudeDelta: defaultRegion.latitudeDelta / 2,
+        longitudeDelta: defaultRegion.longitudeDelta / 2,
+      };
+    }
     return defaultRegion;
-  }, [hasOrigin, hasDestination, originCoordinate, destinationCoordinate]);
+  }, [hasOrigin, hasDestination, originCoordinate, destinationCoordinate, userPoint]);
 
   const stops = useMemo(() => {
     if (!route) return [];
@@ -150,8 +171,13 @@ const RouteMap = ({ route, selectedStops }: RouteMapProps) => {
   }, [selectedStops]);
 
   useEffect(() => {
+    if (driving && focusCoordinate) {
+      return;
+    }
+
     const coordinates: LatLng[] = [];
     if (hasOrigin && originCoordinate) coordinates.push(originCoordinate);
+    if (!hasOrigin && userPoint) coordinates.push(userPoint);
     stops.forEach((stop) => coordinates.push(stop.coordinates));
     selectedMarkers.forEach((station) => coordinates.push(station.coordinates));
     if (hasDestination && destinationCoordinate) coordinates.push(destinationCoordinate);
@@ -164,11 +190,69 @@ const RouteMap = ({ route, selectedStops }: RouteMapProps) => {
         animated: true,
       });
     });
-  }, [hasOrigin, hasDestination, originCoordinate, destinationCoordinate, stops, selectedMarkers]);
+  }, [
+    hasOrigin,
+    hasDestination,
+    originCoordinate,
+    destinationCoordinate,
+    stops,
+    selectedMarkers,
+    userPoint,
+    driving,
+    focusCoordinate,
+  ]);
 
-  if (!route) {
-    return <View style={styles.wrapper} />;
-  }
+  useEffect(() => {
+    if (!mapRef.current || !mapRegion || driving || focusCoordinate) return;
+    mapRef.current.animateToRegion(mapRegion, 400);
+  }, [mapRegion, driving, focusCoordinate]);
+
+  useEffect(() => {
+    if (!driving || !focusCoordinate || !mapRef.current) return;
+
+    const nearestIndex = polylinePoints.reduce(
+      (best, point, index) => {
+        const distance =
+          (focusCoordinate.latitude - point.latitude) ** 2 +
+          (focusCoordinate.longitude - point.longitude) ** 2;
+        if (distance < best.distance) {
+          return { index, distance };
+        }
+        return best;
+      },
+      { index: -1, distance: Number.POSITIVE_INFINITY }
+    );
+
+    const nextPoint =
+      nearestIndex.index >= 0 && nearestIndex.index < polylinePoints.length - 1
+        ? polylinePoints[nearestIndex.index + 1]
+        : null;
+
+    const rawBearing =
+      nextPoint && focusCoordinate
+        ? Math.atan2(
+            Math.sin((nextPoint.longitude - focusCoordinate.longitude) * (Math.PI / 180)) *
+              Math.cos(nextPoint.latitude * (Math.PI / 180)),
+            Math.cos(focusCoordinate.latitude * (Math.PI / 180)) *
+              Math.sin(nextPoint.latitude * (Math.PI / 180)) -
+              Math.sin(focusCoordinate.latitude * (Math.PI / 180)) *
+                Math.cos(nextPoint.latitude * (Math.PI / 180)) *
+                Math.cos((nextPoint.longitude - focusCoordinate.longitude) * (Math.PI / 180))
+          ) *
+          (180 / Math.PI)
+        : undefined;
+    const bearing = rawBearing !== undefined ? ((rawBearing + 360) % 360) : undefined;
+
+    mapRef.current.animateCamera(
+      {
+        center: focusCoordinate,
+        heading: bearing,
+        pitch: 45,
+        zoom: 14.5,
+      },
+      { duration: 650 }
+    );
+  }, [driving, focusCoordinate, polylinePoints]);
 
   return (
     <View style={styles.wrapper}>
@@ -178,25 +262,30 @@ const RouteMap = ({ route, selectedStops }: RouteMapProps) => {
         provider={PROVIDER_GOOGLE}
         initialRegion={mapRegion}
         customMapStyle={colorScheme === 'dark' ? darkMapStyle : lightMapStyle}
+        loadingEnabled
         showsCompass={false}
         showsPointsOfInterest={false}
         showsBuildings={false}
         toolbarEnabled={false}
-        pitchEnabled={false}
+        pitchEnabled={driving}
         showsTraffic={showTraffic}
         showsUserLocation
         showsMyLocationButton
         showsScale
       >
-        {Array.isArray(route.polyline) && route.polyline.length > 0 && (
+        {polylinePoints.length > 0 && (
           <Polyline
-            coordinates={route.polyline.filter((point): point is LatLng => validCoordinate(point))}
+            coordinates={polylinePoints}
             strokeColor={accentColor}
             strokeWidth={5}
           />
         )}
         {hasOrigin && originCoordinate && (
-          <Marker coordinate={originCoordinate} title={route.origin.label} pinColor={accentColor} />
+          <Marker
+            coordinate={originCoordinate}
+            title={route?.origin?.label}
+            pinColor={accentColor}
+          />
         )}
         {stops.map((stop) => (
           <Marker
@@ -228,7 +317,7 @@ const RouteMap = ({ route, selectedStops }: RouteMapProps) => {
         {hasDestination && destinationCoordinate && (
           <Marker
             coordinate={destinationCoordinate}
-            title={route.destination.label}
+            title={route?.destination?.label}
             pinColor={destinationColor}
           />
         )}
@@ -241,7 +330,8 @@ export default memo(RouteMap);
 
 const styles = StyleSheet.create({
   wrapper: {
-    height: 320,
+    flex: 1,
+    minHeight: 320,
     borderRadius: 24,
     overflow: 'hidden',
   },
